@@ -10,8 +10,10 @@ on:
       - '.github/workflows/native-upscaling.yml'
   workflow_dispatch:
 
+# contents: write lets the last step keep the newest build on the
+# ci/native-upscaling-build branch (see that step).
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: native-upscaling-${{ github.ref }}
@@ -33,3 +35,27 @@ jobs:
           path: NativeUpscaling/build/package/
           if-no-files-found: error
           retention-days: 90
+      # Keeps the newest build on its own single-commit branch so it can be fetched with
+      # plain git (build artifacts need a signed-in browser). The branch holds only this
+      # library, its manifest and the license texts, never the NVIDIA runtime files.
+      - name: Publish to the ci/native-upscaling-build branch
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          package="$GITHUB_WORKSPACE/NativeUpscaling/build/package"
+          work="$RUNNER_TEMP/native-build-branch"
+          rm -rf "$work" && mkdir -p "$work"
+          cp "$package/patchers/VRMod.Upscaling.Native.dll" "$work/"
+          cp "$package/plugins/upscaling/native-manifest.json" "$work/"
+          cp -r "$package/plugins/upscaling/licenses" "$work/licenses"
+          printf '%s\n' "VRMod.Upscaling.Native.dll built by .github/workflows/native-upscaling.yml" \
+            "from commit $GITHUB_SHA ($GITHUB_REF_NAME). Source: NativeUpscaling/ on that commit." > "$work/README.txt"
+          cd "$work"
+          git init -q -b ci/native-upscaling-build
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -f
+          git commit -q -m "Native upscaling library built from $GITHUB_SHA"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:ci/native-upscaling-build
