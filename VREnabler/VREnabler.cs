@@ -80,6 +80,9 @@ namespace VRPatcher
 
             Logger.LogInfo($"Copy complete. UnityOpenXR.dll present: {File.Exists(openXRPluginPath)}, openxr_loader.dll present: {File.Exists(openXRLoaderPath)}, manifest present: {File.Exists(openXRSubsystemPath)}");
 
+            // DLSS / FSR upscaling: the native library has to hook Direct3D before the game creates its device.
+            UpscalingBootstrap.Run(Logger);
+
             /*
             if (!VREnabler.EnableVROptions(Path.Combine(VREnabler.ManagedPath, "../globalgamemanagers")))
             {

@@ -2,6 +2,29 @@
 
 This package continues [DrBibop's RoR2VRMod](https://github.com/DrBibop/RoR2VRMod) (MIT), whose own history ends at 2.9.2; its original changelog is kept in the source repository as `CHANGELOG-original-DrBibop.md`. Version numbers restart at 1.0.x for this package.
 
+### 1.2.0
+
+**New**
+- **DLSS / FSR upscaling** (VR tab, off by default): the world is rendered at a lower resolution for each eye and upscaled to the headset's resolution with NVIDIA DLSS on RTX cards, or AMD FSR 3 on other cards. This lowers the GPU load on high resolution headsets. Each eye has its own upscaler with its own depth and motion data. New options in the VR tab:
+  - **DLSS / FSR upscaling** - on / off. Can be switched during a run.
+  - **Upscaling quality** - DLAA (full resolution, anti-aliasing only), Quality (67% per axis), Balanced (58%), Performance (50%), Ultra Performance (33%).
+  - **Upscaler** - Auto, DLSS or FSR 3.
+  - **DLSS preset** - which DLSS model to use. Leave on Default unless you want to compare.
+  - **Upscaling sharpening** - 0 to 1.
+- The upscaling library and the NVIDIA DLSS runtime ship inside this package (`patchers/VRMod.Upscaling.Native.dll` and `plugins/upscaling/`); nothing else has to be installed. Their license texts are in `plugins/upscaling/licenses/`.
+- The upscaling library is a modified build of the native library of [Risk of Rain Upscaling](https://github.com/xanderfrangos/RiskOfRainUpscaling) by Xander Frangos (MIT). Its source and the list of changes are in `NativeUpscaling/` in the source repository.
+
+**Changed**
+- The standalone **Risk of Rain Upscaling** mod must be disabled while this mod's upscaling is used. If it is installed, this mod's upscaling stands down and says so in the log.
+
+**Known issues**
+- Upscaling is new and experimental. It applies during runs; menus and cutscenes stay at full resolution. If it cannot start or fails, the game carries on at full resolution and the reason is written to `BepInEx/LogOutput.log` (search for `[VR upscaling]`) and `BepInEx/VRMod-Upscaling/native.log`.
+- Upscaling moves work from the graphics card to the processor: each eye is drawn by its own camera, so shadows and visibility are worked out twice. It helps most when the graphics card is the limit (high resolution headsets), and can lower the frame rate when the processor is the limit.
+- With upscaling on, the parts of the image hidden by the headset's lenses are still rendered, so **DLAA** can be slower than playing without upscaling.
+- Screen effects (bloom, colour grading) are upscaled together with the world; outlines and the HUD stay at full resolution.
+- If the world appears upside down with upscaling on, set `Flip upscaled image = true` in the `[Upscaling]` section of `VRMod.cfg` and report it.
+- To rule the upscaling library out when troubleshooting, set `Load upscaling library = false` in the `[Upscaling]` section of `VRMod.cfg` and restart the game.
+
 ### 1.1.1
 
 **New**

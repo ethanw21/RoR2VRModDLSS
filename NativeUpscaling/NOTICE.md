@@ -29,7 +29,9 @@ The exported function names keep their upstream `RiskOfRainUpscaling_` prefix.
 
 See `THIRD_PARTY_NOTICES.md` (upstream's notices, unchanged). In short: NVIDIA
 Streamline (MIT), the NVIDIA DLSS runtime (NVIDIA DLSS SDK license), AMD FidelityFX
-SDK and FSR 1 (MIT), and OptiScaler's FidelityFX DX11 port (MIT). The VR mod ships only
+SDK and FSR 1 (MIT), and OptiScaler's FidelityFX DX11 port (MIT). The NVIDIA DLSS
+runtime's license text is `third_party/NVIDIA-RTX-SDKs-LICENSE.txt` (a copy of `LICENSE.txt`
+from <https://github.com/NVIDIA/DLSS>) and ships with the mod as `NVIDIA-RTX-SDKs-LICENSE.txt`. The VR mod ships only
 the D3D11 super-resolution runtime files: `sl.interposer.dll`, `sl.common.dll`,
 `sl.dlss.dll`, `sl.reflex.dll`, `sl.pcl.dll` and `nvngx_dlss.dll`.
 

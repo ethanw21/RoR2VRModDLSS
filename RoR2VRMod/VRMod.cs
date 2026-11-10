@@ -14,7 +14,7 @@ using UnityEngine.XR.OpenXR.Features;
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
 namespace VRMod
 {
-    [BepInPlugin("com.DrBibop.VRMod", "Resurrected VRMod", "1.1.1")]
+    [BepInPlugin("com.DrBibop.VRMod", "Resurrected VRMod", "1.2.0")]
     [BepInDependency("com.Moffein.BanditTweaks", BepInDependency.DependencyFlags.SoftDependency)]
     public class VRMod : BaseUnityPlugin
     {
@@ -53,6 +53,7 @@ namespace VRMod
             MenuSubmitGuard.Init();
             LobbyNavigation.Init();
             CameraFixes.Init();
+            Upscaling.Init(); // 1.2.0 - DLSS / FSR upscaling, one upscaler per eye
             PickerSelectionKeeper.Init(); // 2.26.27 - picker never left with nothing selected
             CutsceneFixes.Init();
             MappingMode.Init(); // 2.23.27 - form hand rebuild + debug freeze / infinite soul

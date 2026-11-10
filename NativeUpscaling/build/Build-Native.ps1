@@ -65,6 +65,8 @@ try {
     Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.md' -Destination (Join-Path $licenses 'RiskOfRainUpscaling-THIRD_PARTY_NOTICES.md') -Force
     Copy-Item -LiteralPath 'NOTICE.md' -Destination (Join-Path $licenses 'VRMod-Upscaling-NOTICE.md') -Force
     Copy-Item -LiteralPath 'third_party\Streamline\license.txt' -Destination (Join-Path $licenses 'Streamline-LICENSE.txt') -Force
+    # The license of the NVIDIA DLSS runtime (nvngx_dlss.dll); a copy of LICENSE.txt from github.com/NVIDIA/DLSS.
+    Copy-Item -LiteralPath 'third_party\NVIDIA-RTX-SDKs-LICENSE.txt' -Destination (Join-Path $licenses 'NVIDIA-RTX-SDKs-LICENSE.txt') -Force
     Copy-Item -LiteralPath 'third_party\FidelityFX-SDK\Kits\FidelityFX\docs\license.md' -Destination (Join-Path $licenses 'FidelityFX-SDK-LICENSE.md') -Force
     Copy-Item -LiteralPath 'third_party\FidelityFX-FSR\LICENSE.txt' -Destination (Join-Path $licenses 'FidelityFX-FSR-LICENSE.txt') -Force
     Copy-Item -LiteralPath 'third_party\FidelityFX-SDK-DX11\LICENSE.txt' -Destination (Join-Path $licenses 'FidelityFX-SDK-DX11-LICENSE.txt') -Force
