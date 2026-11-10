@@ -6,6 +6,7 @@
 #include <tlhelp32.h>
 #include <stdexcept>
 #include <cstring>
+#include <mutex>
 
 bool VerifyNvidiaSignature(const wchar_t* path) { return sl::security::verifyEmbeddedSignature(path); }
 
@@ -79,7 +80,7 @@ struct Runtime {
             prefs.featuresToLoad=features; prefs.numFeaturesToLoad=1; prefs.renderAPI=sl::RenderAPI::eD3D11;
             prefs.flags=sl::PreferenceFlags::eUseManualHooking | sl::PreferenceFlags::eDisableCLStateTracking | sl::PreferenceFlags::eUseFrameBasedResourceTagging;
             prefs.engine=sl::EngineType::eUnity; prefs.engineVersion="2021.3.33";
-            prefs.projectId="b1ac70ad-8304-406a-8b07-0a45519cfeae";
+            prefs.projectId="e71d1387-fcf9-4d15-a7bf-1285051ee32a"; // VRMod change: own project id, separate from the standalone mod.
             prefs.pathToLogsAndData=g_logFolder.c_str(); prefs.logMessageCallback=&CLog;
             prefs.logLevel=sl::LogLevel::eDefault;
             RequireSL(init(prefs, sl::kSDKVersion), "slInit");
@@ -111,10 +112,27 @@ static sl::DLSSMode Mode(int quality) {
     default: return sl::DLSSMode::eDLAA;
     }
 }
+// VRMod change: every DLSS feature owns its own Streamline viewport, so several
+// contexts can run in one frame (one per eye) without sharing temporal history.
+// Upstream used the fixed viewport 1 for its single flat-screen camera. Viewport 0
+// stays reserved for frame generation, as upstream uses it.
+static std::mutex viewportMutex;
+static uint32_t viewportsInUse = 1; // bit n set: viewport id n is taken
+static uint32_t AcquireViewport() {
+    std::lock_guard<std::mutex> guard(viewportMutex);
+    for (uint32_t id = 1; id < 32; ++id)
+        if (!(viewportsInUse & (1u << id))) { viewportsInUse |= 1u << id; return id; }
+    throw std::runtime_error("No free DLSS viewport (31 contexts are already active)");
+}
+static void ReleaseViewport(uint32_t id) {
+    std::lock_guard<std::mutex> guard(viewportMutex);
+    viewportsInUse &= ~(1u << id);
+}
 // DLSS through the process-owned D3D11 Streamline instance. Presentation runs
 // through Streamline's manual hooks, which must service every evaluation.
 class DlssFeature final : public UpscalerFeature {
-    sl::ViewportHandle viewport{1};
+    const uint32_t viewportId=AcquireViewport();
+    sl::ViewportHandle viewport{viewportId};
     UpscalerOptions current{};
     unsigned lastPresentCount=0, unpresentedEvaluations=0;
     static sl::DLSSOptions Options(const UpscalerOptions& o, bool enabled) {
@@ -132,6 +150,8 @@ class DlssFeature final : public UpscalerFeature {
         options.alphaUpscalingEnabled=enabled && o.alpha?sl::Boolean::eTrue:sl::Boolean::eFalse; return options;
     }
 public:
+    DlssFeature() { Log("DLSS_VIEWPORT acquired id=%u",viewportId); }
+    ~DlssFeature() override { ReleaseViewport(viewportId); }
     UpscalerSizes Sizes(const UpscalerOptions& o) override {
         sl::DLSSOptimalSettings settings{};
         RequireSL(runtime->optimal(Options(o,true),settings),"DLSS optimal settings");

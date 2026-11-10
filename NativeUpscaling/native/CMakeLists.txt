@@ -30,7 +30,6 @@ compile_shader(Upscaling/Outlines.hlsl ps_5_0 OutlineUpscale OutlineWeightInput 
 compile_shader(FrameGeneration/FrameGenerationInputs.hlsl ps_5_0 FgDepthInput FgMotionInput)
 compile_shader(FrameGeneration/HudOpacity.hlsl ps_5_0 UiAlpha UiAlphaFlipped)
 compile_shader(FrameGeneration/UiLayer.hlsl ps_5_0 UiLayer UiMask UiMaskAlpha FlipRows Letterbox)
-compile_shader(../tests/native/HudFixture.hlsl ps_5_0 HudFixture)
 
 # AMD FSR 3.1 upscaler on D3D11, from OptiScaler's FidelityFX-SDK-DX11 port: only
 # the upscaler, its D3D11 backend and its shader permutations, linked statically.
@@ -95,39 +94,6 @@ target_compile_definitions(RiskOfRainUpscaling.Native PRIVATE WIN32_LEAN_AND_MEA
 target_compile_options(RiskOfRainUpscaling.Native PRIVATE /W4 /permissive- /EHsc)
 target_link_libraries(RiskOfRainUpscaling.Native PRIVATE FidelityFX.Fsr3Dx11 d3d11 d3d12 dxgi dxguid wintrust crypt32 user32)
 
-enable_testing()
-# native_test(<name> <source> <libraries>...): tests link the DLL's C and C++ test exports.
-function(native_test NAME SOURCE)
-  add_executable(RiskOfRainUpscaling.${NAME} ${SOURCE})
-  add_dependencies(RiskOfRainUpscaling.${NAME} RiskOfRainUpscaling.Shaders)
-  target_compile_definitions(RiskOfRainUpscaling.${NAME} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-  target_compile_options(RiskOfRainUpscaling.${NAME} PRIVATE /W4 /permissive- /EHsc)
-  target_include_directories(RiskOfRainUpscaling.${NAME} PRIVATE ../third_party/Streamline/include)
-  target_link_libraries(RiskOfRainUpscaling.${NAME} PRIVATE ${ARGN})
-endfunction()
-native_test(GraphicsHooksTests ../tests/native/GraphicsHooksTests.cpp RiskOfRainUpscaling.Native d3d11 dxgi)
-native_test(LoggingTests ../tests/native/LoggingTests.cpp RiskOfRainUpscaling.Native)
-native_test(HudOpacityTests ../tests/native/HudOpacityTests.cpp RiskOfRainUpscaling.Native d3d11)
-native_test(FramePacingTests ../tests/native/FramePacingTests.cpp RiskOfRainUpscaling.Native)
-native_test(SceneInputsTests ../tests/native/SceneInputsTests.cpp RiskOfRainUpscaling.Native d3d11 dxgi user32)
-native_test(DiagnosticsTests ../tests/native/DiagnosticsTests.cpp RiskOfRainUpscaling.Native d3d11 dxgi)
-native_test(PipelineTests ../tests/native/PipelineTests.cpp RiskOfRainUpscaling.Native d3d11 dxgi user32)
-native_test(RcasTests ../tests/native/RcasTests.cpp d3d11)
-native_test(FrameBridgeTests ../tests/native/FrameBridgeTests.cpp RiskOfRainUpscaling.Native d3d11 d3d12 dxgi user32)
-add_test(NAME Logging COMMAND RiskOfRainUpscaling.LoggingTests)
-add_test(NAME HudOpacity COMMAND RiskOfRainUpscaling.HudOpacityTests)
-add_test(NAME FramePacing COMMAND RiskOfRainUpscaling.FramePacingTests)
-add_test(NAME GraphicsHooks COMMAND RiskOfRainUpscaling.GraphicsHooksTests --warp)
-
-# Fake Unity exercises preloader-style initialization and prior hook chaining.
-add_library(StartupFixtureUnity SHARED ../tests/startup/FixtureUnity.cpp)
-set_target_properties(StartupFixtureUnity PROPERTIES OUTPUT_NAME UnityPlayer RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/startup-test)
-target_compile_definitions(StartupFixtureUnity PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_compile_options(StartupFixtureUnity PRIVATE /W4 /permissive- /EHsc)
-target_link_libraries(StartupFixtureUnity PRIVATE d3d11 dxgi)
-add_executable(RiskOfRainUpscaling.StartupTests ../tests/startup/StartupTests.cpp)
-set_target_properties(RiskOfRainUpscaling.StartupTests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/startup-test)
-target_compile_definitions(RiskOfRainUpscaling.StartupTests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_compile_options(RiskOfRainUpscaling.StartupTests PRIVATE /W4 /permissive- /EHsc)
-target_link_libraries(RiskOfRainUpscaling.StartupTests PRIVATE StartupFixtureUnity)
-add_dependencies(RiskOfRainUpscaling.StartupTests RiskOfRainUpscaling.Native)
+# VRMod change: the DLL ships under the VR mod's own name so it never collides with the
+# standalone Risk of Rain Upscaling library. Upstream's native tests are not vendored.
+set_target_properties(RiskOfRainUpscaling.Native PROPERTIES OUTPUT_NAME VRMod.Upscaling.Native)

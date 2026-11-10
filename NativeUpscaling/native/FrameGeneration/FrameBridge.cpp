@@ -43,9 +43,12 @@ static std::wstring ConfigPath(){
 }
 // The preloader binds/saves the same preferences used by Mod Options before
 // any swap-chain creation, so a missing entry (standalone tests) stays Off.
+// VRMod change: frame generation swaps the desktop swap chain for a D3D12 bridge and
+// has no use in a headset, so this build never enables it. The standalone mod's
+// config file is ignored, whatever its [Frame Generation] section says.
 static bool SavedFrameGenerationEnabled(const std::wstring& config,wchar_t (&preference)[16]){
-    GetPrivateProfileStringW(L"Frame Generation",L"Enabled",L"",preference,16,config.c_str());
-    return !_wcsicmp(preference,L"true");
+    (void)config; wcscpy_s(preference,L"vr-off");
+    return false;
 }
 bool FrameGenerationRequestedAtStartup(){
     if(bridgeConfigured)return FrameBridgeRequested();

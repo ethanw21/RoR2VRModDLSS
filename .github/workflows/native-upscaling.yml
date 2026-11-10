@@ -1,0 +1,35 @@
+# Builds the native upscaling library the VR mod bundles (Windows x64, MSVC).
+# The library cannot be built on Linux: it needs MSVC, the Windows SDK shader compiler
+# and AMD's Windows-only shader tool. The result is uploaded as a build artifact.
+name: Native upscaling library
+
+on:
+  push:
+    paths:
+      - 'NativeUpscaling/**'
+      - '.github/workflows/native-upscaling.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-upscaling-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        shell: pwsh
+        run: ./NativeUpscaling/build/Build-Native.ps1
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: vrmod-upscaling-native
+          path: NativeUpscaling/build/package/
+          if-no-files-found: error
+          retention-days: 90
