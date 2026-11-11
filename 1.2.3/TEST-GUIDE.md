@@ -5,7 +5,7 @@ This build is for the black screen with the Pimax OpenXR runtime. It is a fact-f
 - Source: branch `claude/vr-dlss-upscaling` (pull request #1), commit `ba4f5bb`.
 - Native upscaling library: unchanged from 1.2.1 (built by GitHub Actions from commit `4a37fb7`).
 
-**Result (2026-11-11):** the headset stayed black, and the report showed that the Pimax runtime fails inside its own software, for another game as well. The cause is outside the mod. See "Result of build 1.2.3" in the [Pimax check guide](../pimax-openxr/CHECK-GUIDE.md). One correction to the text below: Unity had already started the session before it asked for the eye textures, so the "session started first" step did not come into play.
+**Result (2026-11-11):** the headset stayed black, and the report showed that the Pimax runtime fails inside its own software, for another game as well. The cause turned out to be how the Pimax software was being used on the test PC, not a bug, so this test is closed. See "Result of build 1.2.3" in the [Pimax check guide](../pimax-openxr/CHECK-GUIDE.md). **The test to do now is the upscaling test: [UPSCALING-TEST.md](UPSCALING-TEST.md).** One correction to the text below: Unity had already started the session before it asked for the eye textures, so the "session started first" step did not come into play.
 
 **The test is two starts of the game, one right after the other, about two minutes each.** Section 3 has the steps.
 
@@ -139,7 +139,7 @@ Through SteamVR's runtime, where the eye textures are accepted, `Auto` never swi
 
 ## 8. The upscaling test under SteamVR
 
-This build contains the same upscaling as 1.2.1. If the 1.2.1 test under SteamVR is still to do, do it with this build after the two Pimax starts: switch the default runtime back to SteamVR and follow sections 3 and 4 of the [1.2.1 guide](../1.2.1/TEST-GUIDE.md). The only difference is the version line in the log.
+This build contains the same upscaling as 1.2.1. The upscaling test for it has its own page: [UPSCALING-TEST.md](UPSCALING-TEST.md).
 
 ## 9. Going back
 

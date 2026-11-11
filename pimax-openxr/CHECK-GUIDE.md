@@ -24,7 +24,9 @@ The headset stayed black, and the report says why. **The cause is not in the mod
 - The same lines are in that folder's log for another game (Nuclear Option) from the same evening. The failure is not specific to Risk of Rain 2 or to this mod.
 - On the game's side everything was in order: the session had already been started when the eye textures were requested, the game's graphics device was on the adapter the runtime asked for, and no other program's OpenXR layer was installed.
 
-No request the mod can make changes this. What is left is the Pimax software itself (version, settings, headset firmware) or something on the PC that affects it, which is a question for Pimax support. The game works through SteamVR's OpenXR runtime.
+No request the mod can make changes this.
+
+**Closed (2026-11-11).** The tester found the cause: the Pimax software was not being used the way it is meant to be on the test PC. It was not a bug in the Pimax runtime, the game or the mod, and there is nothing left to fix here. Work is back on the upscaling test: [1.2.3/UPSCALING-TEST.md](../1.2.3/UPSCALING-TEST.md).
 
 The rest of this page is the original check, kept for reference.
 
