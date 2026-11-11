@@ -6,6 +6,10 @@ This branch holds ready-built test versions of the mod, one folder per version, 
 | --- | --- | --- |
 | 1.2.1 | [1.2.1/TEST-GUIDE.md](1.2.1/TEST-GUIDE.md) | Fixes from the first headset test: right eye black, freeze when flicking through settings, DLSS switching itself off. Adds measurements to explain the missing speedup. |
 
+Other guides:
+
+- [pimax-openxr/CHECK-GUIDE.md](pimax-openxr/CHECK-GUIDE.md): what to try and which logs to send for the black screen with the Pimax OpenXR runtime. No install needed.
+
 A version number is never reused: every new build gets its own folder.
 
 The NVIDIA DLSS runtime files are not kept in this repository. Each guide says where they come from.
