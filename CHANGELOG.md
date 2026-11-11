@@ -2,28 +2,9 @@
 
 This package continues [DrBibop's RoR2VRMod](https://github.com/DrBibop/RoR2VRMod) (MIT), whose own history ends at 2.9.2; its original changelog is kept in the source repository as `CHANGELOG-original-DrBibop.md`. Version numbers restart at 1.0.x for this package.
 
-### 1.2.3
+### 1.2.4
 
-A diagnostic build for the same headset as 1.2.2. The 1.2.2 log showed that the Pimax OpenXR runtime refuses every eye texture whatever is asked for (all formats, all usage flags, every size down to 512x512), so the request is not what it objects to. This build looks at everything around the request.
-
-Result on that headset: still black, and the report shows why. The Pimax runtime fails inside its own client library when it creates a texture for the game (its own log: `createTexture failed with error:1`), and it does the same for another game on the same PC. The session order, the graphics adapter and other programs' OpenXR layers were all in order. The cause turned out to be how the Pimax software was being used on that PC, not a bug in the runtime, the game or the mod.
-
-**New**
-- **Start-up report** (on by default): how the VR session starts is recorded and written once per start: the OpenXR calls in the order they were first made, with counts and results; the graphics device handed to the runtime and whether it is on the graphics adapter the runtime asked for; the OpenXR layers other programs have installed; the controller profiles the runtime refused; and the runtime's own diagnostic messages where it offers them (`XR_EXT_debug_utils`). When the runtime refuses every eye texture, the last lines of the runtime's own log files are added.
-- **A report file that covers several starts:** everything under `[VR display]` also goes to `BepInEx/VRMod-Display/report.txt`, which is added to on every start instead of being overwritten. Nothing is sent anywhere.
-- **Session started first:** when the runtime has refused every kind of eye texture and the OpenXR session has not been started yet at that point, the mod starts it and asks once more.
-- **OpenXR layers** (config file, section `Headset compatibility`: `Auto`, `Keep` or `Skip`, default `Auto`): other programs (Virtual Desktop, overlays, tools) place add-ons called layers between every VR game and the headset's runtime. `Skip` starts this game without them; nothing on the PC is changed. `Auto` leaves them on, but after a start in which the runtime refused every eye texture the next start runs without them, and keeps doing so while that works. If the runtime refuses without them as well, they stay on. Applies after a restart.
-- **OpenXR start-up report** (same section, on / off): turns the record, the session-first attempt and the report of the runtime's log files off.
-- Two more answers in the table of what the runtime accepts: the same request as a static image and as a depth texture.
-
-### 1.2.2
-
-For headsets whose OpenXR runtime refuses the eye textures the game asks for. Found on a Pimax Dream Air with the Pimax OpenXR runtime set as default: the session started, every request for an eye texture came back `XR_ERROR_FEATURE_UNSUPPORTED`, and the headset stayed black (the same game worked through SteamVR's runtime).
-
-**New**
-- **Eye texture fallback** (on by default): when the runtime refuses the eye textures three times in a row, the mod asks it for the same textures with other usage flags, other formats and smaller sizes, and continues with the best combination it accepts. The game's normal request is tried first and is left alone while the runtime accepts it. Not yet confirmed on the headset that has the problem.
-- **What happened is written to the log** (`BepInEx/LogOutput.log`, lines starting with `[VR display]`): the request, the runtime's answer, which alternatives it accepted, what the mod continued with, and the OpenXR session states. On a refusal it also lists the libraries loaded into the game from outside the Windows folder.
-- **Eye texture scale** (config file, section `Headset compatibility`, 0.25 to 1, default 1): renders the eye textures smaller than the runtime recommends. Applies after a restart.
+The same upscaling as 1.2.1, with nothing else. Test builds 1.2.2 and 1.2.3 carried extra code to look into a black screen on one headset (an eye texture guard, a start-up report, the config section `Headset compatibility` and the folder `BepInEx/VRMod-Display`). The black screen turned out to be a set-up problem on that PC and not a fault in the mod, so all of it has been removed again. If you ran one of those two builds, the section `[Headset compatibility]` in `VRMod.cfg` and the folder `BepInEx/VRMod-Display` are no longer used and can be deleted.
 
 ### 1.2.1
 
