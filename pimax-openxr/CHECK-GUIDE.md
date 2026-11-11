@@ -2,6 +2,16 @@
 
 The mod works when SteamVR is the OpenXR runtime. With the Pimax OpenXR runtime (the one inside Pimax Play) set as default, the picture is entirely black. This guide collects what is needed to find out why. Nothing has to be installed for it. Use whichever version of the mod is in the profile now (1.2.1 if you have it).
 
+## Result of Part 1 (2026-11-11)
+
+The logs from Part 1 gave the cause. The game reaches the Pimax runtime ("Pimax OpenXR" 0.1.0) and the session starts. The runtime then refuses every request for an eye texture with `XR_ERROR_FEATURE_UNSUPPORTED`, at the size and in the format it had itself recommended (6464x5044 per eye, RGBA8 sRGB). Unity asked 2,586 times in 30 seconds. Without eye textures the headset stays black.
+
+OpenXR Toolkit, PimaxXR and Quad Views are ruled out: the first two are not installed and Quad Views was off. The only OpenXR layer on the machine is Virtual Desktop's compatibility layer, which is also there when the game works through SteamVR.
+
+Why the runtime refuses is not known yet. **The next step is build 1.2.2: [1.2.2/TEST-GUIDE.md](../1.2.2/TEST-GUIDE.md).** It asks the runtime in other ways, continues with what the runtime accepts, and writes down every answer.
+
+The rest of this page is the original check, kept for reference. Steps C and D of Part 2 are still useful if 1.2.2 reports that the runtime refuses every kind of request.
+
 Part 1 takes about five minutes and is the part that matters. Part 2 is optional and only saves a round trip if one of its steps happens to bring the picture back.
 
 ## What is known so far
@@ -61,4 +71,4 @@ Step D matters most for the mod itself: if the picture returns only with the ups
 
 ## After this
 
-If the logs show a refused call or a missing feature, the next test build changes how the mod starts OpenXR for this runtime. If the logs look healthy and the picture is still black, the next build adds a display report and switches to try in the headset (for example drawing without the runtime's hidden area mask).
+Done: see "Result of Part 1" at the top. The logs showed a refused call, and build 1.2.2 is the answer to it.
