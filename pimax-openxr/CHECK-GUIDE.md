@@ -16,6 +16,16 @@ The runtime refused every kind of request: seven colour formats, four kinds of u
 
 **The next step is build 1.2.3: [1.2.3/TEST-GUIDE.md](../1.2.3/TEST-GUIDE.md).** It starts the session before asking, can start the game without other programs' OpenXR layers, and writes a report with the start-up calls, the graphics device and the last lines of the runtime's own log files.
 
+## Result of build 1.2.3 (2026-11-11)
+
+The headset stayed black, and the report says why. **The cause is not in the mod or the game.**
+
+- The Pimax software's own log for the game (`%LOCALAPPDATA%\Pimax\runtime\pvr_client_Risk of Rain 2_log.txt`) shows its client library failing whenever it creates a texture for the game: `createTexture failed with error:1`, then `pvr_createTextureSwapChainDX ... pvrResult failure [1]` at `PiOpenXR\swapchain.cpp:412`. The runtime passes that on to the game as `XR_ERROR_FEATURE_UNSUPPORTED`.
+- The same lines are in that folder's log for another game (Nuclear Option) from the same evening. The failure is not specific to Risk of Rain 2 or to this mod.
+- On the game's side everything was in order: the session had already been started when the eye textures were requested, the game's graphics device was on the adapter the runtime asked for, and no other program's OpenXR layer was installed.
+
+No request the mod can make changes this. What is left is the Pimax software itself (version, settings, headset firmware) or something on the PC that affects it, which is a question for Pimax support. The game works through SteamVR's OpenXR runtime.
+
 The rest of this page is the original check, kept for reference.
 
 Part 1 takes about five minutes and is the part that matters. Part 2 is optional and only saves a round trip if one of its steps happens to bring the picture back.
