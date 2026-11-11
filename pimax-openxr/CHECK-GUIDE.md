@@ -10,7 +10,13 @@ OpenXR Toolkit, PimaxXR and Quad Views are ruled out: the first two are not inst
 
 Why the runtime refuses is not known yet. **The next step is build 1.2.2: [1.2.2/TEST-GUIDE.md](../1.2.2/TEST-GUIDE.md).** It asks the runtime in other ways, continues with what the runtime accepts, and writes down every answer.
 
-The rest of this page is the original check, kept for reference. Steps C and D of Part 2 are still useful if 1.2.2 reports that the runtime refuses every kind of request.
+## Result of build 1.2.2 (2026-11-11)
+
+The runtime refused every kind of request: seven colour formats, four kinds of usage, every size down to 950x762, a two-layer texture and a plain 512x512 texture. So the request is not what it objects to. ReShade was not loaded in that run, and a run with the mod's upscaling library switched off gave the same black screen, which settles steps C and D of Part 2 below.
+
+**The next step is build 1.2.3: [1.2.3/TEST-GUIDE.md](../1.2.3/TEST-GUIDE.md).** It starts the session before asking, can start the game without other programs' OpenXR layers, and writes a report with the start-up calls, the graphics device and the last lines of the runtime's own log files.
+
+The rest of this page is the original check, kept for reference.
 
 Part 1 takes about five minutes and is the part that matters. Part 2 is optional and only saves a round trip if one of its steps happens to bring the picture back.
 
