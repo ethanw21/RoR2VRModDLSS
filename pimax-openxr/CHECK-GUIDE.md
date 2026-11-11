@@ -8,7 +8,7 @@ Part 1 takes about five minutes and is the part that matters. Part 2 is optional
 
 - The mod asks the runtime for nothing unusual: Direct3D 11, a normal two-eye view, two eye textures (one per eye), and no depth submission. The open source PimaxXR runtime supports all of that, and its author says the runtime in Pimax Play is largely based on it.
 - No report was found of Unity games in general failing on the Pimax runtime. The black screens and failed starts that are reported come from things around the game: the OpenXR Toolkit layer, the Quad Views setting, and SteamVR starting on its own.
-- Unlike SteamVR, the Pimax runtime (going by the PimaxXR source) asks the game's own Direct3D 11 device for newer interfaces and opens shared textures on it. Anything that wraps that device can get in the way. In this game folder that means ReShade (`dxgi.dll`), RenoDX and the DLSS bridge from your own experiments, and possibly this mod's upscaling library.
+- Going by the PimaxXR source, the Pimax runtime asks the game's own Direct3D 11 device for newer interfaces and opens shared textures on it. Anything that wraps that device can get in the way. How SteamVR handles the same device is not public, so this is a lead, not a finding. In this game folder that means ReShade (`dxgi.dll`), RenoDX and the DLSS bridge from your own experiments, and possibly this mod's upscaling library.
 
 None of these has been confirmed as the cause. The logs from Part 1 decide.
 
