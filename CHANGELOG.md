@@ -2,6 +2,18 @@
 
 This package continues [DrBibop's RoR2VRMod](https://github.com/DrBibop/RoR2VRMod) (MIT), whose own history ends at 2.9.2; its original changelog is kept in the source repository as `CHANGELOG-original-DrBibop.md`. Version numbers restart at 1.0.x for this package.
 
+### 1.2.3
+
+A diagnostic build for the same headset as 1.2.2. The 1.2.2 log showed that the Pimax OpenXR runtime refuses every eye texture whatever is asked for (all formats, all usage flags, every size down to 512x512), so the request is not what it objects to. This build looks at everything around the request. Not yet confirmed on the headset that has the problem.
+
+**New**
+- **Start-up report** (on by default): how the VR session starts is recorded and written once per start: the OpenXR calls in the order they were first made, with counts and results; the graphics device handed to the runtime and whether it is on the graphics adapter the runtime asked for; the OpenXR layers other programs have installed; the controller profiles the runtime refused; and the runtime's own diagnostic messages where it offers them (`XR_EXT_debug_utils`). When the runtime refuses every eye texture, the last lines of the runtime's own log files are added.
+- **A report file that covers several starts:** everything under `[VR display]` also goes to `BepInEx/VRMod-Display/report.txt`, which is added to on every start instead of being overwritten. Nothing is sent anywhere.
+- **Session started first:** when the runtime has refused every kind of eye texture, the mod starts the OpenXR session itself and asks once more. Unity asks for the eye textures before it starts the session; a runtime that wants it the other way round gets it that way, and the game carries on.
+- **OpenXR layers** (config file, section `Headset compatibility`: `Auto`, `Keep` or `Skip`, default `Auto`): other programs (Virtual Desktop, overlays, tools) place add-ons called layers between every VR game and the headset's runtime. `Skip` starts this game without them; nothing on the PC is changed. `Auto` leaves them on, but after a start in which the runtime refused every eye texture the next start runs without them, and keeps doing so while that works. If the runtime refuses without them as well, they stay on. Applies after a restart.
+- **OpenXR start-up report** (same section, on / off): turns the record, the session-first attempt and the report of the runtime's log files off.
+- Two more answers in the table of what the runtime accepts: the same request as a static image and as a depth texture.
+
 ### 1.2.2
 
 For headsets whose OpenXR runtime refuses the eye textures the game asks for. Found on a Pimax Dream Air with the Pimax OpenXR runtime set as default: the session started, every request for an eye texture came back `XR_ERROR_FEATURE_UNSUPPORTED`, and the headset stayed black (the same game worked through SteamVR's runtime).

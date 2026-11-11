@@ -22,6 +22,11 @@ namespace VRMod
     /// recommended, and the headset stayed black. Which part of the request that runtime objects
     /// to is not known; this class finds out on the machine that has the problem.
     ///
+    /// When the runtime refuses every kind of request, the request is not the cause. The guard
+    /// then tries once with the session started first (Unity asks for the eye textures before
+    /// xrBeginSession), and the log gets the start-up record (OpenXRJournal) and the end of the
+    /// runtime's own log files (OpenXRSurroundings).
+    ///
     /// While the runtime accepts what Unity asks for, every call is passed through unchanged.
     /// xrCreateSwapchain and the two enumerations are called on Unity's render thread, so nothing
     /// here touches Unity objects from those calls, and messages are queued for the main thread.
@@ -90,6 +95,13 @@ namespace VRMod
         private const int RefusalsBeforeProbe = 3;
 
         private static bool probed, loggedCreated, loggedStillRefused, loggedHookFault, loggedModules;
+        private static bool refusedEverything, reportArmed, reportWritten, sessionSeen;
+        private static DateTime reportDue = DateTime.MaxValue;
+        private static string pendingOutcome;
+        private static volatile int sessionState;
+        private static readonly OpenXRJournal.Entry createEntry = OpenXRJournal.EntryFor("xrCreateSwapchain");
+        private static readonly OpenXRJournal.Entry viewsEntry = OpenXRJournal.EntryFor("xrEnumerateViewConfigurationViews");
+        private static readonly OpenXRJournal.Entry formatsEntry = OpenXRJournal.EntryFor("xrEnumerateSwapchainFormats");
         private static int refusals, lastRefusalReported, refusalsInARow, lastRefusalResult;
         private static string lastRequest = "";
 
@@ -110,10 +122,21 @@ namespace VRMod
             }
         }
 
-        /// <summary>Writes queued messages to the log. Main thread only.</summary>
-        internal static void Flush()
+        /// <summary>Turns the start-up record on or off. Main thread, before the OpenXR loader starts.</summary>
+        internal static void ConfigureReport(bool report)
+        {
+            OpenXRJournal.Enabled = report;
+        }
+
+        /// <summary>
+        /// Writes queued messages to the log and to the report file. Main thread only.
+        /// final: the game is closing, so write the start-up record now if it is still owed.
+        /// </summary>
+        internal static void Flush(bool final = false)
         {
             KeyValuePair<bool, string>[] lines;
+            string outcome;
+            bool report, refused, modules;
             lock (gate)
             {
                 if (refusals - lastRefusalReported >= 2000 && !Created)
@@ -121,25 +144,48 @@ namespace VRMod
                     lastRefusalReported = refusals;
                     pending.Add(new KeyValuePair<bool, string>(true, $"The headset's runtime has now refused the eye textures {refusals} times; the headset stays black. Last request: {lastRequest}."));
                 }
-                if (pending.Count == 0) return;
+                outcome = pendingOutcome; pendingOutcome = null;
+                report = !reportWritten && ((reportArmed && DateTime.UtcNow >= reportDue) || (final && sessionSeen));
+                if (report) reportWritten = true;
+                refused = refusedEverything;
+                modules = probed && !loggedModules && report;
+                if (modules) loggedModules = true;
                 lines = pending.ToArray();
                 pending.Clear();
             }
+            Write(lines);
+            if (outcome != null) OpenXRSurroundings.RecordOutcome(outcome);
+            if (!report) return;
+
+            List<KeyValuePair<bool, string>> more = new List<KeyValuePair<bool, string>>();
+            string journal = OpenXRJournal.Report();
+            if (journal.Length > 0) more.Add(new KeyValuePair<bool, string>(false, journal));
+            if (refused && OpenXRJournal.Enabled)
+            {
+                string runtime = "";
+                try { runtime = UnityEngine.XR.OpenXR.OpenXRRuntime.name; } catch { }
+                more.Add(new KeyValuePair<bool, string>(false, OpenXRSurroundings.RuntimeLogExcerpts(runtime)));
+            }
+            if (modules) more.Add(new KeyValuePair<bool, string>(false, Modules()));
+            Write(more.ToArray());
+        }
+
+        private static void Write(KeyValuePair<bool, string>[] lines)
+        {
+            if (lines.Length == 0) return;
+            List<string> forReport = new List<string>();
             foreach (KeyValuePair<bool, string> line in lines)
             {
                 if (line.Key) VRMod.StaticLogger.LogWarning("[VR display] " + line.Value);
                 else VRMod.StaticLogger.LogInfo("[VR display] " + line.Value);
+                forReport.Add((line.Key ? "! " : "  ") + line.Value);
             }
-            if (probed && !loggedModules)
-            {
-                loggedModules = true;
-                LogModules();
-            }
+            OpenXRSurroundings.AppendReport(forReport);
         }
 
         // What is loaded into the game besides Windows itself: wrappers and injected libraries
-        // show up here. Logged once, when the runtime first refuses a request.
-        private static void LogModules()
+        // show up here. Listed once, when the runtime has refused a request.
+        private static string Modules()
         {
             try
             {
@@ -148,21 +194,52 @@ namespace VRMod
                 foreach (System.Diagnostics.ProcessModule module in System.Diagnostics.Process.GetCurrentProcess().Modules)
                 {
                     string path = module.FileName ?? "";
-                    if (path.Length == 0 || (windows.Length > 0 && path.StartsWith(windows, StringComparison.OrdinalIgnoreCase))) continue;
+                    if (path.Length == 0 || path.StartsWith("[In Memory]") || (windows.Length > 0 && path.StartsWith(windows, StringComparison.OrdinalIgnoreCase))) continue;
                     names.Add(path);
                 }
                 names.Sort(StringComparer.OrdinalIgnoreCase);
-                VRMod.StaticLogger.LogInfo($"[VR display] Libraries loaded from outside the Windows folder ({names.Count}):\n    " + string.Join("\n    ", names.ToArray()));
+                return $"Libraries loaded from outside the Windows folder ({names.Count}):\n    " + string.Join("\n    ", names.ToArray());
             }
             catch (Exception e)
             {
-                VRMod.StaticLogger.LogInfo("[VR display] Could not list the loaded libraries: " + e.Message);
+                return "Could not list the loaded libraries: " + e.Message;
             }
         }
 
-        private static void Say(string message, bool warning = false)
+        internal static void Say(string message, bool warning = false)
         {
             lock (gate) pending.Add(new KeyValuePair<bool, string>(warning, message));
+        }
+
+        // The runtime's own function for a name, past this class's replacements.
+        private static IntPtr Lookup(ulong instance, string function)
+        {
+            if (instance == 0 || nextProcAddr == null) return IntPtr.Zero;
+            IntPtr name = Marshal.StringToHGlobalAnsi(function), slot = Marshal.AllocHGlobal(IntPtr.Size);
+            try
+            {
+                Marshal.WriteIntPtr(slot, IntPtr.Zero);
+                return nextProcAddr(instance, name, slot) < 0 ? IntPtr.Zero : Marshal.ReadIntPtr(slot);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(name);
+                Marshal.FreeHGlobal(slot);
+            }
+        }
+
+        public override bool OnInstanceCreate(ulong xrInstance)
+        {
+            try
+            {
+                if (xrInstance != 0) lastInstance = xrInstance;
+                OpenXRJournal.StartMessages(xrInstance, Lookup);
+            }
+            catch (Exception e)
+            {
+                Say("Could not ask the runtime for its own messages: " + e.Message);
+            }
+            return true;
         }
 
         public override IntPtr HookGetInstanceProcAddr(IntPtr func)
@@ -170,6 +247,7 @@ namespace VRMod
             try
             {
                 if (func == IntPtr.Zero || procAddrHookPtr == IntPtr.Zero) return func;
+                OpenXRJournal.Forget();
                 nextProcAddr = (GetProcAddrFn)Marshal.GetDelegateForFunctionPointer(func, typeof(GetProcAddrFn));
                 return procAddrHookPtr;
             }
@@ -182,6 +260,7 @@ namespace VRMod
 
         public override void OnSessionStateChange(int oldState, int newState)
         {
+            sessionState = newState;
             Say($"OpenXR session state {StateName(oldState)} -> {StateName(newState)}.");
         }
 
@@ -193,6 +272,7 @@ namespace VRMod
                 probed = false; loggedCreated = false; loggedStillRefused = false;
                 refusals = 0; lastRefusalReported = 0; refusalsInARow = 0; lastRefusalResult = 0; Created = false;
                 forcedFormat = 0; usageOverride = 0; fallbackScale = 1f;
+                refusedEverything = false; reportArmed = false; reportWritten = false; reportDue = DateTime.MaxValue; sessionSeen = true;
             }
         }
 
@@ -205,7 +285,8 @@ namespace VRMod
                 if (result < 0 || name == IntPtr.Zero || function == IntPtr.Zero) return result;
                 IntPtr target = Marshal.ReadIntPtr(function);
                 if (target == IntPtr.Zero) return result;
-                switch (Marshal.PtrToStringAnsi(name))
+                string text = Marshal.PtrToStringAnsi(name);
+                switch (text)
                 {
                     case "xrCreateSwapchain":
                         if (target == createHookPtr) break;
@@ -225,6 +306,11 @@ namespace VRMod
                         nextViews = (EnumerateViewsFn)Marshal.GetDelegateForFunctionPointer(target, typeof(EnumerateViewsFn));
                         Marshal.WriteIntPtr(function, viewsHookPtr);
                         break;
+                    default:
+                        // The calls that start the session and the frames are only counted.
+                        IntPtr counted = OpenXRJournal.Wrap(instance, text, target);
+                        if (counted != IntPtr.Zero) Marshal.WriteIntPtr(function, counted);
+                        break;
                 }
             }
             catch (Exception e)
@@ -239,6 +325,7 @@ namespace VRMod
         private static int ViewsHook(ulong instance, ulong systemId, int viewConfigurationType, uint capacity, IntPtr countOutput, IntPtr views)
         {
             int result = nextViews(instance, systemId, viewConfigurationType, capacity, countOutput, views);
+            OpenXRJournal.Note(viewsEntry, result);
             try
             {
                 if (result < 0 || capacity == 0 || views == IntPtr.Zero || countOutput == IntPtr.Zero) return result;
@@ -274,6 +361,7 @@ namespace VRMod
             if (forced == 0 || known.Length == 0 || countOutput == IntPtr.Zero)
             {
                 int result = nextFormats(session, capacity, countOutput, formats);
+                OpenXRJournal.Note(formatsEntry, result);
                 try
                 {
                     if (result >= 0 && capacity > 0 && formats != IntPtr.Zero && countOutput != IntPtr.Zero)
@@ -324,14 +412,17 @@ namespace VRMod
                     : nextCreate(session, createInfo, swapchain);
                 called = true;
                 if (!colour) return result;
+                OpenXRJournal.Note(createEntry, result);
 
                 if (result >= 0) OnCreated(asked, usage);
                 else if (OnRefused(session, asked, result))
                 {
-                    // Only the usage flags had to change: this very call can still succeed.
-                    int retry = CreateWith(session, asked, asked.format, usageOverride, asked.width, asked.height, swapchain);
+                    // A change that needs nothing from Unity (other usage flags, or the session
+                    // started first) was enough: this very call can still succeed.
+                    ulong retryUsage = usageOverride != 0 ? usageOverride : asked.usageFlags;
+                    int retry = CreateWith(session, asked, asked.format, retryUsage, asked.width, asked.height, swapchain);
                     result = retry;
-                    if (retry >= 0) OnCreated(asked, usageOverride);
+                    if (retry >= 0) OnCreated(asked, retryUsage);
                 }
                 return result;
             }
@@ -348,6 +439,12 @@ namespace VRMod
             refusalsInARow = 0;
             if (loggedCreated) return;
             loggedCreated = true;
+            lock (gate)
+            {
+                pendingOutcome = "accepted";
+                // A few seconds later, so the record also shows the first frames.
+                if (!reportArmed || refusedEverything) { reportArmed = true; reportDue = DateTime.UtcNow.AddSeconds(4); }
+            }
             float scale = userScale * fallbackScale;
             string changes = "";
             if (usage != 0 && usage != asked.usageFlags) changes += $" Usage flags changed from 0x{asked.usageFlags:X} to 0x{usage:X}.";
@@ -356,7 +453,7 @@ namespace VRMod
             Say($"Eye texture accepted by the runtime: {Describe(asked)}.{changes}", changes.Length > 0 && (fallbackScale < 0.999f || forcedFormat != 0));
         }
 
-        /// <returns>True when a change of usage flags alone is enough, so the caller can retry at once.</returns>
+        /// <returns>True when the caller can retry the same request at once.</returns>
         private static bool OnRefused(ulong session, CreateInfo asked, int result)
         {
             lock (gate)
@@ -383,6 +480,11 @@ namespace VRMod
             // or stopped session cannot.
             if (!AboutTheRequest(result) || ++refusalsInARow < RefusalsBeforeProbe) return false;
             probed = true;
+            lock (gate)
+            {
+                pendingOutcome = "refused";
+                reportArmed = true; reportDue = DateTime.UtcNow.AddSeconds(1);
+            }
 
             if (!fallbackAllowed)
             {
@@ -450,7 +552,10 @@ namespace VRMod
             // Two more answers that help to read the result: a texture array and a small plain texture.
             int array = Try(session, asked, asked.format, asked.usageFlags, asked.width, asked.height, 2);
             int small = Try(session, asked, asked.format, asked.usageFlags, 512, 512);
-            table.Append($"\n    same request as a two-layer array: {ResultName(array)}; 512x512 in the same format: {ResultName(small)}");
+            int still = Try(session, asked, asked.format, asked.usageFlags, asked.width, asked.height, 0, 0x2);
+            table.Append($"\n    same request as a two-layer array: {ResultName(array)}; 512x512 in the same format: {ResultName(small)}; as a static image: {ResultName(still)}");
+            if (Array.IndexOf(runtimeFormats, 40L) >= 0)
+                table.Append($"; as a depth texture (format 40, usage 0x22): {ResultName(Try(session, asked, 40, 0x22, asked.width, asked.height))}");
             Say("What the runtime accepts instead:" + table, true);
 
             // Keep Unity's colour encoding unless the other one allows more than twice the size.
@@ -458,8 +563,8 @@ namespace VRMod
             float scale = bestScale[pick];
             if (scale <= 0f)
             {
-                Say("The runtime refused every combination tried, so the request itself is not the problem. Something about this session or the graphics device is. The Pimax guide on the test-builds branch says what to rule out next.", true);
-                return false;
+                lock (gate) refusedEverything = true;
+                return AfterEverythingRefused(session, asked);
             }
             long chosenFormat = bestFormat[pick];
             ulong chosenUsage = bestUsage[pick];
@@ -488,33 +593,62 @@ namespace VRMod
             return usageOnly && usageOverride != 0;
         }
 
+        // Every kind of request was refused, so the request is not what the runtime objects to.
+        // One thing about the session can still be changed from here. Unity asks for the eye
+        // textures before it starts the session (xrBeginSession); it only starts the session once
+        // the textures exist. OpenXR allows that order, but a runtime may want the session started
+        // first. Try that once: start the session, ask again.
+        private static bool AfterEverythingRefused(ulong session, CreateInfo asked)
+        {
+            StringBuilder text = new StringBuilder("The runtime refused every combination tried, so the request itself is not what it objects to.");
+            bool helped = false;
+            if (!OpenXRJournal.Enabled || !OpenXRJournal.CanBeginSession)
+                text.Append(" Starting the session first was not tried (the start-up report is off).");
+            else if (OpenXRJournal.SessionBegun)
+                text.Append(" The session had already been started when Unity asked, so the order of the calls is not the cause.");
+            else if (sessionState != 2)
+                text.Append($" Starting the session first was not tried: the session is in state {StateName(sessionState)}, not READY.");
+            else
+            {
+                int? begun = OpenXRJournal.BeginSession(session);
+                if (begun == null) text.Append(" Starting the session first was not possible.");
+                else if (begun.Value < 0) text.Append($" Starting the session before asking (Unity asks first, then starts it) was refused as well: {ResultName(begun.Value)}.");
+                else
+                {
+                    int again = Try(session, asked, asked.format, asked.usageFlags, asked.width, asked.height);
+                    if (again >= 0)
+                    {
+                        helped = true;
+                        text.Append(" WITH THE SESSION STARTED FIRST, THE RUNTIME ACCEPTS THE EYE TEXTURE. Unity asks for the eye textures before it starts the session; this runtime wants the session started first. The mod has started it and carries on.");
+                    }
+                    else
+                    {
+                        int small = Try(session, asked, asked.format, asked.usageFlags, 512, 512);
+                        text.Append($" Starting the session before asking (Unity asks first, then starts it) went through, but the runtime still refuses: {ResultName(again)} at full size, {ResultName(small)} at 512x512.");
+                    }
+                }
+            }
+            if (!helped) text.Append(" The start-up record and the runtime's own log lines follow.");
+            Say(text.ToString(), true);
+            return helped;
+        }
+
         // Unity normally looks xrDestroySwapchain up itself, which is where it is picked up. This
         // asks the runtime directly in case it has not.
         private static void FindDestroy()
         {
-            if (lastInstance == 0 || nextProcAddr == null) return;
-            IntPtr name = Marshal.StringToHGlobalAnsi("xrDestroySwapchain"), slot = Marshal.AllocHGlobal(IntPtr.Size);
-            try
-            {
-                Marshal.WriteIntPtr(slot, IntPtr.Zero);
-                if (nextProcAddr(lastInstance, name, slot) < 0) return;
-                IntPtr target = Marshal.ReadIntPtr(slot);
-                if (target != IntPtr.Zero) nextDestroy = (DestroySwapchainFn)Marshal.GetDelegateForFunctionPointer(target, typeof(DestroySwapchainFn));
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(name);
-                Marshal.FreeHGlobal(slot);
-            }
+            IntPtr target = Lookup(lastInstance, "xrDestroySwapchain");
+            if (target != IntPtr.Zero) nextDestroy = (DestroySwapchainFn)Marshal.GetDelegateForFunctionPointer(target, typeof(DestroySwapchainFn));
         }
 
-        private static int Try(ulong session, CreateInfo asked, long format, ulong usage, uint width, uint height, uint arraySize = 0)
+        private static int Try(ulong session, CreateInfo asked, long format, ulong usage, uint width, uint height, uint arraySize = 0, ulong createFlags = 0)
         {
             IntPtr handle = Marshal.AllocHGlobal(8);
             try
             {
                 Marshal.WriteInt64(handle, 0);
                 if (arraySize != 0) asked.arraySize = arraySize;
+                if (createFlags != 0) asked.createFlags = createFlags;
                 int result = CreateWith(session, asked, format, usage, width, height, handle);
                 if (result >= 0)
                 {
@@ -595,26 +729,69 @@ namespace VRMod
             }
         }
 
-        private static string ResultName(int result)
+        private static readonly Dictionary<int, string> ResultNames = new Dictionary<int, string>
         {
-            switch (result)
-            {
-                case 0: return "XR_SUCCESS";
-                case -1: return "XR_ERROR_VALIDATION_FAILURE";
-                case -2: return "XR_ERROR_RUNTIME_FAILURE";
-                case -3: return "XR_ERROR_OUT_OF_MEMORY";
-                case -7: return "XR_ERROR_FUNCTION_UNSUPPORTED";
-                case -8: return "XR_ERROR_FEATURE_UNSUPPORTED";
-                case -10: return "XR_ERROR_LIMIT_REACHED";
-                case -11: return "XR_ERROR_SIZE_INSUFFICIENT";
-                case -12: return "XR_ERROR_HANDLE_INVALID";
-                case -13: return "XR_ERROR_INSTANCE_LOST";
-                case -16: return "XR_ERROR_SESSION_NOT_RUNNING";
-                case -17: return "XR_ERROR_SESSION_LOST";
-                case -26: return "XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED";
-                case -38: return "XR_ERROR_GRAPHICS_DEVICE_INVALID";
-                default: return result >= 0 ? "success code " + result : "error code " + result;
-            }
+            { 9, "XR_FRAME_DISCARDED" },
+            { 8, "XR_SESSION_NOT_FOCUSED" },
+            { 4, "XR_EVENT_UNAVAILABLE" },
+            { 3, "XR_SESSION_LOSS_PENDING" },
+            { 1, "XR_TIMEOUT_EXPIRED" },
+            { 0, "XR_SUCCESS" },
+            { -1, "XR_ERROR_VALIDATION_FAILURE" },
+            { -2, "XR_ERROR_RUNTIME_FAILURE" },
+            { -3, "XR_ERROR_OUT_OF_MEMORY" },
+            { -4, "XR_ERROR_API_VERSION_UNSUPPORTED" },
+            { -6, "XR_ERROR_INITIALIZATION_FAILED" },
+            { -7, "XR_ERROR_FUNCTION_UNSUPPORTED" },
+            { -8, "XR_ERROR_FEATURE_UNSUPPORTED" },
+            { -9, "XR_ERROR_EXTENSION_NOT_PRESENT" },
+            { -10, "XR_ERROR_LIMIT_REACHED" },
+            { -11, "XR_ERROR_SIZE_INSUFFICIENT" },
+            { -12, "XR_ERROR_HANDLE_INVALID" },
+            { -13, "XR_ERROR_INSTANCE_LOST" },
+            { -14, "XR_ERROR_SESSION_RUNNING" },
+            { -16, "XR_ERROR_SESSION_NOT_RUNNING" },
+            { -17, "XR_ERROR_SESSION_LOST" },
+            { -18, "XR_ERROR_SYSTEM_INVALID" },
+            { -19, "XR_ERROR_PATH_INVALID" },
+            { -20, "XR_ERROR_PATH_COUNT_EXCEEDED" },
+            { -21, "XR_ERROR_PATH_FORMAT_INVALID" },
+            { -22, "XR_ERROR_PATH_UNSUPPORTED" },
+            { -23, "XR_ERROR_LAYER_INVALID" },
+            { -24, "XR_ERROR_LAYER_LIMIT_EXCEEDED" },
+            { -25, "XR_ERROR_SWAPCHAIN_RECT_INVALID" },
+            { -26, "XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED" },
+            { -27, "XR_ERROR_ACTION_TYPE_MISMATCH" },
+            { -28, "XR_ERROR_SESSION_NOT_READY" },
+            { -29, "XR_ERROR_SESSION_NOT_STOPPING" },
+            { -30, "XR_ERROR_TIME_INVALID" },
+            { -31, "XR_ERROR_REFERENCE_SPACE_UNSUPPORTED" },
+            { -32, "XR_ERROR_FILE_ACCESS_ERROR" },
+            { -33, "XR_ERROR_FILE_CONTENTS_INVALID" },
+            { -34, "XR_ERROR_FORM_FACTOR_UNSUPPORTED" },
+            { -35, "XR_ERROR_FORM_FACTOR_UNAVAILABLE" },
+            { -36, "XR_ERROR_API_LAYER_NOT_PRESENT" },
+            { -37, "XR_ERROR_CALL_ORDER_INVALID" },
+            { -38, "XR_ERROR_GRAPHICS_DEVICE_INVALID" },
+            { -39, "XR_ERROR_POSE_INVALID" },
+            { -40, "XR_ERROR_INDEX_OUT_OF_RANGE" },
+            { -41, "XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED" },
+            { -42, "XR_ERROR_ENVIRONMENT_BLEND_MODE_UNSUPPORTED" },
+            { -44, "XR_ERROR_NAME_DUPLICATED" },
+            { -45, "XR_ERROR_NAME_INVALID" },
+            { -46, "XR_ERROR_ACTIONSET_NOT_ATTACHED" },
+            { -47, "XR_ERROR_ACTIONSETS_ALREADY_ATTACHED" },
+            { -48, "XR_ERROR_LOCALIZED_NAME_DUPLICATED" },
+            { -49, "XR_ERROR_LOCALIZED_NAME_INVALID" },
+            { -50, "XR_ERROR_GRAPHICS_REQUIREMENTS_CALL_MISSING" },
+            { -51, "XR_ERROR_RUNTIME_UNAVAILABLE" },
+        };
+
+        internal static string ResultName(int result)
+        {
+            string name;
+            if (ResultNames.TryGetValue(result, out name)) return name;
+            return result >= 0 ? "success code " + result : "error code " + result;
         }
 
         private static bool AboutTheRequest(int result)

@@ -14,7 +14,7 @@ using UnityEngine.XR.OpenXR.Features;
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
 namespace VRMod
 {
-    [BepInPlugin("com.DrBibop.VRMod", "Resurrected VRMod", "1.2.2")]
+    [BepInPlugin("com.DrBibop.VRMod", "Resurrected VRMod", "1.2.3")]
     [BepInDependency("com.Moffein.BanditTweaks", BepInDependency.DependencyFlags.SoftDependency)]
     public class VRMod : BaseUnityPlugin
     {
@@ -113,6 +113,18 @@ namespace VRMod
             DontDestroyOnLoad(guardDriver);
             guardDriver.AddComponent<EyeTextureGuardDriver>();
 
+            // Lists the OpenXR layers other programs have installed and, when the setting says
+            // so, starts without them. Has to happen before the loader reads them.
+            try
+            {
+                OpenXRSurroundings.Configure(System.IO.Path.Combine(Paths.BepInExRootPath, "VRMod-Display"), Info.Metadata.Version.ToString());
+                OpenXRSurroundings.BeforeLoader(ModConfig.OpenXRLayers.Value, EyeTextureGuard.Say);
+            }
+            catch (Exception e)
+            {
+                StaticLogger.LogWarning("[VR display] Could not look at the OpenXR layers: " + e.Message);
+            }
+
             managerSettings.InitializeLoaderSync();
 
             if (managerSettings.activeLoader == null)
@@ -169,6 +181,7 @@ namespace VRMod
             // teardown, and with an OpenXR session attached that teardown is what hangs or crashes
             // the process (the BepInEx log always ends mid-line right after this point). So: stop
             // the XR session cleanly, flush the log, and end the process ourselves.
+            try { EyeTextureGuard.Flush(true); } catch { }
             try
             {
                 if (activeManagerSettings != null && activeManagerSettings.activeLoader != null)
@@ -263,8 +276,17 @@ namespace VRMod
                 try
                 {
                     EyeTextureGuard.Configure(ModConfig.EyeTextureFallback.Value, ModConfig.EyeTextureScale.Value);
+                    EyeTextureGuard.ConfigureReport(ModConfig.OpenXRReport.Value);
                     var guard = ScriptableObject.CreateInstance<EyeTextureGuard>();
                     guard.enabled = true;
+                    if (ModConfig.OpenXRReport.Value)
+                    {
+                        // Lets the runtime send its own diagnostic messages to the guard. Runtimes
+                        // without this extension ignore the request.
+                        var extensions = typeof(OpenXRFeature).GetField("openxrExtensionStrings",
+                            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+                        if (extensions != null) extensions.SetValue(guard, "XR_EXT_debug_utils");
+                    }
                     features.Add(guard);
                 }
                 catch (Exception e)

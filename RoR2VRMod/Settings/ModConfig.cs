@@ -64,6 +64,8 @@ namespace VRMod
         internal static ConfigEntry<string> UpscalingProfiler { get; private set; }
         internal static ConfigEntry<bool> EyeTextureFallback { get; private set; }
         internal static ConfigEntry<float> EyeTextureScale { get; private set; }
+        internal static ConfigEntry<string> OpenXRLayers { get; private set; }
+        internal static ConfigEntry<bool> OpenXRReport { get; private set; }
         internal static ConfigEntry<float> BottomAnchor { get; private set; }
         internal static ConfigEntry<float> TopAnchor { get; private set; }
         internal static ConfigEntry<float> LeftAnchor { get; private set; }
@@ -662,6 +664,19 @@ namespace VRMod
                 "Eye texture scale",
                 1f,
                 "Size of the eye textures as a share of what the headset's runtime recommends, from 0.25 to 1. Lower it if the runtime recommends more than it accepts or more than the graphics card can handle. Applies after a restart."
+            );
+            OpenXRLayers = configFile.Bind<string>(
+                "Headset compatibility",
+                "OpenXR layers",
+                "Auto",
+                new ConfigDescription("OpenXR layers are add-ons that other programs (Virtual Desktop, overlays, tools) place between every VR game and the headset's runtime. Keep: leave them on. Skip: start this game without them (nothing on the PC is changed). Auto: leave them on, but after a start in which the headset's runtime refused every eye texture, the next start runs without them, and keeps doing so while that works; if it is refused without them as well, they stay on. Applies after a restart.",
+                    new AcceptableValueList<string>("Auto", "Keep", "Skip"))
+            );
+            OpenXRReport = configFile.Bind<bool>(
+                "Headset compatibility",
+                "OpenXR start-up report",
+                true,
+                "Records how the VR session starts: the order and results of the OpenXR calls, the graphics device handed to the headset's runtime, the installed OpenXR layers and the runtime's own messages. When the runtime refuses the eye textures, the last lines of the runtime's own log files are added. Everything goes to LogOutput.log under [VR display] and to BepInEx/VRMod-Display/report.txt, and stays on this PC. Applies after a restart."
             );
             BottomAnchor = configFile.Bind<float>(
                 "HUD Settings",
