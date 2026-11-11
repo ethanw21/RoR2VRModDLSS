@@ -148,6 +148,13 @@ namespace VRMod
                                 return "#FFFFFF";
                             else if (self.settingName == "vr_haptics_suit")
                                 return "None";
+                            else if (setting.choices != null)
+                            {
+                                // Hand-edited config values may differ in case; anything else shows the default.
+                                foreach (string choiceString in setting.choices)
+                                    if (string.Equals(choiceString, value, StringComparison.OrdinalIgnoreCase)) return choiceString;
+                                return entry.DefaultValue as string;
+                            }
                         }
                     }
                 }
@@ -358,6 +365,17 @@ namespace VRMod
                             CarouselController.Choice choice = new CarouselController.Choice();
                             choice.convarValue = choiceStrings[i];
                             choice.suboptionDisplayToken = choiceStrings[i];
+                            choices.Add(choice);
+                        }
+                    }
+                    else if (setting.choices != null)
+                    {
+                        // 1.2.0: any text setting that lists its own choices (upscaling quality, upscaler, DLSS preset).
+                        foreach (string choiceString in setting.choices)
+                        {
+                            CarouselController.Choice choice = new CarouselController.Choice();
+                            choice.convarValue = choiceString;
+                            choice.suboptionDisplayToken = choiceString;
                             choices.Add(choice);
                         }
                     }

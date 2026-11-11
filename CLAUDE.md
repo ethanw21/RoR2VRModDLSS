@@ -31,7 +31,10 @@ RoR2VRMod/                  ← source code (C#)
   Haptics/                   ← Shockwave / bHaptics suit support (optional DLLs)
   UI/                        ← HUD, UI pointer, UI fixes
   Settings/                  ← mod config (ModConfig.cs), settings panel addon
+  Upscaling/                 ← DLSS / FSR upscaling, one upscaler per eye (see "Upscaling" below)
   LIV/                       ← LIV mixed-reality capture SDK (unchanged from original)
+VREnabler/                  ← preloader patcher (VRPatcher.dll); UpscalingBootstrap.cs loads the native upscaling library
+NativeUpscaling/            ← source of VRMod.Upscaling.Native.dll (from Risk of Rain Upscaling, MIT; changes listed in NOTICE.md)
 ```
 
 ## Build toolchain
@@ -104,6 +107,23 @@ void Init() { try { new ShockwaveController(); } catch { } }
 void Init() { try { CreateShockwave(); } catch { } }
 private static GenericHapticsController CreateShockwave() => new ShockwaveController();
 ```
+
+### Upscaling (1.2.0)
+
+`RoR2VRMod/Upscaling/` renders each eye at a reduced size and upscales it with DLSS or FSR 3. Nothing GPU or VR related can be run in the cloud build environment, so every change here has to be tested in a headset.
+
+- **Native library:** `VRMod.Upscaling.Native.dll` is built from `NativeUpscaling/` on Windows only (`.github/workflows/native-upscaling.yml`). The workflow keeps the newest build on the single-commit branch `ci/native-upscaling-build`, which can be fetched with plain git. The NVIDIA runtime DLLs are never committed; `NativeUpscaling/build/Fetch-Runtime.ps1` fetches them for packaging.
+- **Load order:** `VRPatcher` (`UpscalingBootstrap`) loads the library before the game creates its graphics device, because DLSS needs to see the device and swap chain being created. The plugin (`UpscalingNative`) binds the already loaded library. Both stand down when the standalone Risk of Rain Upscaling mod is installed.
+- **Frame flow (`Upscaling.cs`):** `Application.onBeforeRender` turns the stereo scene camera into a presenter that draws nothing. At its first pre-cull, two mono eye cameras (`UpscalingEye`) render with `Camera.Render()` from `GetStereoViewMatrix` / the stereo reference camera's `GetStereoProjectionMatrix`, each with its own native depth/motion capture and upscaler. For each eye pass, a hook on the scene camera's `PostProcessLayer.OnRenderImage` (its first image effect) blits that eye's upscaled image to the destination instead of the presenter's empty picture (`Upscaling.Present`). The scene camera is restored at the end of the frame (`WaitForEndOfFrame`), never from a camera callback. 1.2.0 copied the eyes in with a command buffer at `BeforeImageEffects` and restored from `OnPostRender`; the right eye came out black in the headset, most likely because `OnPostRender` runs before a pass's image effects and the restore emptied that buffer first (not confirmed on a headset).
+- **One set of upscalers at a time:** a settings change detaches at once but re-attaches only after the setting has rested (`SettleSeconds`) and the old native contexts are collected (`ReadyToAttach`). At headset resolutions two sets do not fit in video memory together.
+- **Diagnostics:** `Status` lines every 60 s (frame time, frames shown per eye, video memory), a one-time brightness probe of each eye's textures, and the native GPU profiler (`UpscalingProfiler` marks, `profile.log`). The video memory guard (`CheckVideoMemory`) pauses upscaling after 5 s over the DXGI budget.
+- **Package layout:** `patchers/VRMod.Upscaling.Native.dll`; `plugins/upscaling/D3D11/` (six NVIDIA runtime DLLs), `plugins/upscaling/licenses/`, `plugins/upscaling/native-manifest.json`.
+- **Private post-processing members** (`PostProcessLayer.m_LegacyCmdBuffer*`, `m_Resources`, `PostProcessManager.m_Volumes`) are reached through reflection in `UpscalingHooks.cs`, because `VRMod.csproj` references `Unity.Postprocessing.Runtime` unpublicized.
+- **Settings:** section `[Upscaling]` in `VRMod.cfg`. String settings with a `choices` array show as carousels in the VR tab (`ConfigSetting.choices`, `SettingsAddon.cs`).
+
+### Removed: eye texture guard and OpenXR start-up report (1.2.2, 1.2.3)
+
+Test builds 1.2.2 (commit `6dcc1d9`) and 1.2.3 (commit `ba4f5bb`) added `Camera/EyeTextureGuard.cs`, `OpenXRJournal.cs` and `OpenXRSurroundings.cs` to find out why a Pimax OpenXR runtime refused every eye texture. The cause was a set-up problem on the tester's PC, and 1.2.4 removed all of it at the tester's request. Do not bring it back unasked. If a runtime ever does refuse the eye textures, those two commits hold a working probe of `xrCreateSwapchain`, a record of the session start-up calls and a reader for the runtime's own log files. One thing learned there: Unity's OpenXR plugin 1.9.1 calls `xrBeginSession` before the first `xrCreateSwapchain`.
 
 ### Lobby navigation
 

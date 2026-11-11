@@ -23,6 +23,7 @@ Open the in-game *Settings* and pick the **VR** tab (the same options are in `Be
 - **Rebinding** — A new tab that gives you the ability to rebind buttons
 - **VR Performance mode** — Off by default reduces on-screen effects in big fights for a smoother frame rate: fewer effects, at most 30 new damage numbers per second, at most 150 of your team's projectiles (8 Electric Boomerangs) and 10 experience orbs per second drawn. Visual only - hits, damage, gold and experience are unchanged, and other players are not affected.
 - **Reduce sounds under heavy load** — Off by default stops dozens of copies of the same sound stacking up in big fights. Hit, crit and gold pickup sounds are kept.
+- **DLSS / FSR upscaling** — *Off by default* renders the world at a lower resolution for each eye and upscales it to the headset's resolution with NVIDIA DLSS (RTX cards) or AMD FSR 3 (other cards), for a higher frame rate on high resolution headsets. Each eye has its own upscaler. The VR tab also has **Upscaling quality** (DLAA, Quality, Balanced, Performance, Ultra Performance), **Upscaler** (Auto, DLSS, FSR 3), **DLSS preset** and **Upscaling sharpening**. See [Upscaling](#upscaling-dlss--fsr) below.
 
 
 
@@ -132,6 +133,17 @@ In the in-game *Settings*, the **BINDINGS** tab (to the right of **VR**) lists e
 Conflicts are flagged on the row. **Reset all bindings** restores the defaults. The choices are saved in the `[Bindings]` section of `VRMod.cfg`; `default` means the built-in layout for your controller. The game's own Keyboard + Mouse and Controller binding pages are not used for VR controls.
 
 
+## Upscaling (DLSS / FSR)
+
+Turn on **DLSS / FSR upscaling** in the VR tab. Everything it needs ships with the mod; there is nothing else to install.
+
+- **What it does:** during a run, each eye's view of the world is rendered at a lower resolution and upscaled to the headset's resolution. NVIDIA RTX cards use DLSS; other cards use FSR 3. Each eye has its own upscaler with its own depth and motion data, so the two eyes never share history.
+- **Quality:** DLAA keeps full resolution and only anti-aliases. Quality renders 67% per axis, Balanced 58%, Performance 50% and Ultra Performance 33%. Lower is faster and softer.
+- **When it helps:** when the graphics card is the limit, which is the usual case on high resolution headsets. Each eye is drawn by its own camera, so the processor does somewhat more work than without upscaling.
+- **Not together with the standalone mod:** disable [Risk of Rain Upscaling](https://thunderstore.io/package/XanderChaos/RiskOfRainUpscaling/) while using this. If it is installed, the VR mod's upscaling stands down.
+- **Where it applies:** runs only. Menus and cutscenes stay at full resolution.
+- **If something is wrong:** the game falls back to full resolution and writes the reason to `BepInEx/LogOutput.log` (search for `[VR upscaling]`) and to `BepInEx/VRMod-Upscaling/native.log`. The `[Upscaling]` section of `VRMod.cfg` has three troubleshooting options: `Load upscaling library`, `Upscaling log level` and `Flip upscaled image`.
+
 ## Known issues in this build
 
 - Hand models are not shown inside menus (menus are navigated like a gamepad). Hands and weapons work normally in a run.
@@ -159,5 +171,17 @@ The original Visual Studio project files are kept, but this build was produced w
 **Daerst:** fixed the biggest and oldest bug of the original mod\
 **laila, HutchyBen, Skarl1n, Geb, Popzix, Terrorcotta211:** controller support for the original mod\
 **Blowntobytes:** welder, current-game-version port, OpenXR rebuild and maintenance of this fork\
+**Xander Frangos:** [Risk of Rain Upscaling](https://github.com/xanderfrangos/RiskOfRainUpscaling) (MIT), whose native library the upscaling feature is built on\
 The `ParentCamera.projectionMatrix = _childCamera.GetStereoProjectionMatrix(eye)` stereo fix came from a community report\
 Playtesters: JosheM, Void-Citizen, Thanjar(for left-handed mode)
+
+## Third-party software
+
+The upscaling feature uses the following, each under its own license. The license texts ship in `plugins/upscaling/licenses/` and the source of the upscaling library, with the list of changes made for this mod, is in [`NativeUpscaling/`](NativeUpscaling/NOTICE.md).
+
+- [Risk of Rain Upscaling](https://github.com/xanderfrangos/RiskOfRainUpscaling) native library by Xander Frangos, MIT, modified for one upscaler per eye
+- [NVIDIA Streamline](https://github.com/NVIDIA-RTX/Streamline) 2.14.1, MIT
+- [NVIDIA DLSS](https://github.com/NVIDIA/DLSS) runtime 310.9.1, NVIDIA DLSS SDK license
+- [AMD FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) and [FSR 1](https://github.com/GPUOpen-Effects/FidelityFX-FSR), and the [FidelityFX DX11 port](https://github.com/optiscaler/FidelityFX-SDK-DX11) by OptiScaler, MIT
+
+NVIDIA, RTX and DLSS are trademarks of NVIDIA Corporation. AMD, FidelityFX and FSR are trademarks of Advanced Micro Devices, Inc. This project is not affiliated with or endorsed by NVIDIA, AMD, Hopoo Games, Gearbox or the author of Risk of Rain Upscaling.

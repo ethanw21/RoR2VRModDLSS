@@ -2,6 +2,50 @@
 
 This package continues [DrBibop's RoR2VRMod](https://github.com/DrBibop/RoR2VRMod) (MIT), whose own history ends at 2.9.2; its original changelog is kept in the source repository as `CHANGELOG-original-DrBibop.md`. Version numbers restart at 1.0.x for this package.
 
+### 1.2.4
+
+The same upscaling as 1.2.1, with nothing else. Test builds 1.2.2 and 1.2.3 carried extra code to look into a black screen on one headset (an eye texture guard, a start-up report, the config section `Headset compatibility` and the folder `BepInEx/VRMod-Display`). The black screen turned out to be a set-up problem on that PC and not a fault in the mod, so all of it has been removed again. If you ran one of those two builds, the section `[Headset compatibility]` in `VRMod.cfg` and the folder `BepInEx/VRMod-Display` are no longer used and can be deleted.
+
+### 1.2.1
+
+Fixes for upscaling after its first test in a headset (4940x4136 per eye, RTX 5090).
+
+**Fixed**
+- **The right eye stayed black during runs with upscaling on.** Both eyes were being upscaled, but the last step, handing each eye's finished image to the headset, did not reach the right eye. Each image is now handed over inside the scene camera's own image effect chain, and the scene camera keeps its presenting state until the whole frame has been drawn.
+- **Flicking through upscaling settings could freeze the game.** Every stop on a settings carousel built a new pair of upscalers while the previous pair still held its video memory, which at headset resolutions adds up to several gigabytes. A setting is now applied once it has rested for about a second, and the old upscalers are released before the new ones are created.
+- **DLSS switched itself off when video memory ran short.** NVIDIA's runtime reports "over the video memory budget" as a warning; the mod treated it as a failure and turned DLSS off for the rest of the session. It is now logged and upscaling continues.
+
+**New**
+- **Video memory guard:** if the game stays over its video memory budget for five seconds with upscaling on, upscaling pauses itself, the game goes back to full resolution, and a line in the game's chat box says so. Changing any upscaling setting tries again. At very high headset resolutions DLAA and the heaviest DLSS presets may not fit.
+- **Measurements in the log** (`BepInEx/LogOutput.log`, lines starting with `[VR upscaling]`): average and slowest frame time with upscaling on, the average frame time at full resolution before it was turned on, how many frames each eye was shown, video memory use, and a one-time check that both eyes' images are not black.
+- **GPU profile:** for the first minute after upscaling turns on or a setting changes, the GPU time of every step (drawing each eye, post-processing, the upscaler itself, handing the image to the headset) is written to `BepInEx/VRMod-Upscaling/profile.log`. `Upscaling profiler` in the `[Upscaling]` section of `VRMod.cfg` switches this to `Always` or `Off`.
+
+**Known issues**
+- At very high headset resolutions the upscaler itself is expensive: its cost grows with the output size, and the newest DLSS models (presets M and L) cost the most. If the frame rate does not improve, try the preset **K** or **E**, or **FSR 3**, and compare the numbers in the log. Upscaling only the centre of the view (foveated upscaling) is planned for this.
+
+### 1.2.0
+
+**New**
+- **DLSS / FSR upscaling** (VR tab, off by default): the world is rendered at a lower resolution for each eye and upscaled to the headset's resolution with NVIDIA DLSS on RTX cards, or AMD FSR 3 on other cards. This lowers the GPU load on high resolution headsets. Each eye has its own upscaler with its own depth and motion data. New options in the VR tab:
+  - **DLSS / FSR upscaling** - on / off. Can be switched during a run.
+  - **Upscaling quality** - DLAA (full resolution, anti-aliasing only), Quality (67% per axis), Balanced (58%), Performance (50%), Ultra Performance (33%).
+  - **Upscaler** - Auto, DLSS or FSR 3.
+  - **DLSS preset** - which DLSS model to use. Leave on Default unless you want to compare.
+  - **Upscaling sharpening** - 0 to 1.
+- The upscaling library and the NVIDIA DLSS runtime ship inside this package (`patchers/VRMod.Upscaling.Native.dll` and `plugins/upscaling/`); nothing else has to be installed. Their license texts are in `plugins/upscaling/licenses/`.
+- The upscaling library is a modified build of the native library of [Risk of Rain Upscaling](https://github.com/xanderfrangos/RiskOfRainUpscaling) by Xander Frangos (MIT). Its source and the list of changes are in `NativeUpscaling/` in the source repository.
+
+**Changed**
+- The standalone **Risk of Rain Upscaling** mod must be disabled while this mod's upscaling is used. If it is installed, this mod's upscaling stands down and says so in the log.
+
+**Known issues**
+- Upscaling is new and experimental. It applies during runs; menus and cutscenes stay at full resolution. If it cannot start or fails, the game carries on at full resolution and the reason is written to `BepInEx/LogOutput.log` (search for `[VR upscaling]`) and `BepInEx/VRMod-Upscaling/native.log`.
+- Upscaling moves work from the graphics card to the processor: each eye is drawn by its own camera, so shadows and visibility are worked out twice. It helps most when the graphics card is the limit (high resolution headsets), and can lower the frame rate when the processor is the limit.
+- With upscaling on, the parts of the image hidden by the headset's lenses are still rendered, so **DLAA** can be slower than playing without upscaling.
+- Screen effects (bloom, colour grading) are upscaled together with the world; outlines and the HUD stay at full resolution.
+- If the world appears upside down with upscaling on, set `Flip upscaled image = true` in the `[Upscaling]` section of `VRMod.cfg` and report it.
+- To rule the upscaling library out when troubleshooting, set `Load upscaling library = false` in the `[Upscaling]` section of `VRMod.cfg` and restart the game.
+
 ### 1.1.1
 
 **New**

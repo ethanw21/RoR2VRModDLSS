@@ -1,0 +1,28 @@
+#pragma once
+#include <windows.h>
+#include <d3d11_4.h>
+#include <d3d12.h>
+#include <dxgi1_6.h>
+#include <wrl/client.h>
+#include <string>
+#include <atomic>
+#include "Core/Logging.h"
+
+template<class T> using ComPtr = Microsoft::WRL::ComPtr<T>;
+__declspec(dllexport) void Log(const char* format, ...);
+__declspec(dllexport) void Log(ModLogLevel severity, const char* format, ...);
+// Whether messages at this severity are currently written (gates costly diagnostics).
+bool LogEnabled(ModLogLevel severity);
+bool VerifyNvidiaSignature(const wchar_t* path);
+// NVIDIA SDKs are loaded only on adapters with this PCI vendor ID.
+constexpr UINT NvidiaVendorId = 0x10DE;
+// FSR 4 runs only on AMD adapters.
+constexpr UINT AmdVendorId = 0x1002;
+extern std::wstring g_logFolder, g_runtimeFolder;
+
+extern "C" __declspec(dllexport) int __cdecl RiskOfRainUpscaling_Initialize(const wchar_t*, const wchar_t*, const wchar_t*);
+extern "C" __declspec(dllexport) int __cdecl RiskOfRainUpscaling_GetObservedDeviceCount();
+extern "C" __declspec(dllexport) void __cdecl RiskOfRainUpscaling_SetLoggingLevel(int);
+// This process's video memory budget and current use on the adapter that owns the given
+// D3D11 resource (any texture of the game's device), in bytes. 0 on success, -1 when unknown.
+extern "C" __declspec(dllexport) int __cdecl RiskOfRainUpscaling_QueryVideoMemory(void* resource, unsigned long long* budgetBytes, unsigned long long* usedBytes);

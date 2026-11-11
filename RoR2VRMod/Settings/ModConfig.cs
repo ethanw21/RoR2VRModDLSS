@@ -53,6 +53,15 @@ namespace VRMod
         internal static ConfigEntry<bool> WristChatNoFade { get; private set; }
         internal static ConfigEntry<bool> ReduceEffectsUnderLoad { get; private set; }
         internal static ConfigEntry<bool> ReduceSoundsUnderLoad { get; private set; }
+        internal static ConfigEntry<bool> UpscalingEnabled { get; private set; }
+        internal static ConfigEntry<string> UpscalingQuality { get; private set; }
+        internal static ConfigEntry<string> UpscalingBackend { get; private set; }
+        internal static ConfigEntry<string> UpscalingPreset { get; private set; }
+        internal static ConfigEntry<float> UpscalingSharpness { get; private set; }
+        internal static ConfigEntry<bool> UpscalingLoadLibrary { get; private set; }
+        internal static ConfigEntry<string> UpscalingLogLevel { get; private set; }
+        internal static ConfigEntry<bool> UpscalingFlip { get; private set; }
+        internal static ConfigEntry<string> UpscalingProfiler { get; private set; }
         internal static ConfigEntry<float> BottomAnchor { get; private set; }
         internal static ConfigEntry<float> TopAnchor { get; private set; }
         internal static ConfigEntry<float> LeftAnchor { get; private set; }
@@ -584,6 +593,62 @@ namespace VRMod
                 false,
                 "When the same sound is triggered many times at once (big fights, lots of item procs), only the first couple of copies are played instead of stacking dozens on top of each other. Local only - other players are not affected."
             );
+            // 1.2.0: DLSS / FSR upscaling. The first five are shown in the VR settings tab; the
+            // section and the two "library" keys are also read by VRPatcher (UpscalingBootstrap).
+            UpscalingEnabled = configFile.Bind<bool>(
+                "Upscaling",
+                "DLSS / FSR upscaling",
+                false,
+                "Renders the world at a lower resolution for each eye and upscales it to the headset's resolution with NVIDIA DLSS (AMD FSR 3 on other graphics cards). Raises the frame rate on high resolution headsets. Each eye has its own upscaler, depth and motion data. Applies during runs; menus stay at full resolution. The standalone Risk of Rain Upscaling mod has to be disabled."
+            );
+            UpscalingQuality = configFile.Bind<string>(
+                "Upscaling",
+                "Upscaling quality",
+                "Quality",
+                "How far the render resolution is lowered before upscaling. DLAA keeps full resolution and only anti-aliases (best image, no speed gain). Quality renders 67% per axis, Balanced 58%, Performance 50%, Ultra Performance 33%. Lower is faster and softer. Values: DLAA, Quality, Balanced, Performance, Ultra Performance."
+            );
+            UpscalingBackend = configFile.Bind<string>(
+                "Upscaling",
+                "Upscaler",
+                "Auto",
+                "Which upscaler to use. Auto picks DLSS on NVIDIA RTX cards and FSR 3 on everything else. Values: Auto, DLSS, FSR 3."
+            );
+            UpscalingPreset = configFile.Bind<string>(
+                "Upscaling",
+                "DLSS preset",
+                "Default",
+                "Which DLSS model to use (DLSS only). Default lets NVIDIA pick and is recommended. K, J, M and L are the newer, better-looking models: L is the sharpest but slowest, and M is a faster alternative to L. E is the older model: the fastest but softest. Values: Default, K, M, L, J, E."
+            );
+            UpscalingSharpness = configFile.Bind<float>(
+                "Upscaling",
+                "Upscaling sharpening",
+                0.7f,
+                new ConfigDescription("How much to sharpen the image after upscaling. 0 is off; 1 is strongest.", new AcceptableValueRange<float>(0f, 1f))
+            );
+            UpscalingLoadLibrary = configFile.Bind<bool>(
+                "Upscaling",
+                "Load upscaling library",
+                true,
+                "Loads the DLSS / FSR library when the game starts. DLSS needs it loaded before the game creates its graphics device, so this only applies after a restart. Turn it off to rule the library out when troubleshooting; the upscaling settings then do nothing."
+            );
+            UpscalingLogLevel = configFile.Bind<string>(
+                "Upscaling",
+                "Upscaling log level",
+                "Info",
+                "Detail of BepInEx\\VRMod-Upscaling\\native.log. Applies after a restart. Values: Off, Error, Warning, Info, Debug."
+            );
+            UpscalingFlip = configFile.Bind<bool>(
+                "Upscaling",
+                "Flip upscaled image",
+                false,
+                "Troubleshooting only: turn on if the world appears upside down in the headset while upscaling is on."
+            );
+            UpscalingProfiler = configFile.Bind<string>(
+                "Upscaling",
+                "Upscaling profiler",
+                "Start",
+                "Records how much GPU time each upscaling step takes, to BepInEx\\VRMod-Upscaling\\profile.log. Start records the first minute after upscaling turns on or one of its settings changes; Always records the whole time; Off records nothing. Values: Off, Start, Always."
+            );
             BottomAnchor = configFile.Bind<float>(
                 "HUD Settings",
                 "Bottom anchor",
@@ -686,6 +751,11 @@ namespace VRMod
             settings.Add("vr_item_hints", new ConfigSetting(ItemHints, ConfigSetting.SettingUpdate.Instant));
             settings.Add("vr_reduce_effects", new ConfigSetting(ReduceEffectsUnderLoad, ConfigSetting.SettingUpdate.Instant));
             settings.Add("vr_reduce_sounds", new ConfigSetting(ReduceSoundsUnderLoad, ConfigSetting.SettingUpdate.Instant));
+            settings.Add("vr_upscaling", new ConfigSetting(UpscalingEnabled, ConfigSetting.SettingUpdate.Instant, Upscaling.OnSettingChanged));
+            settings.Add("vr_upscaling_quality", new ConfigSetting(UpscalingQuality, UpscalingPolicy.QualityNames, ConfigSetting.SettingUpdate.Instant, Upscaling.OnSettingChanged));
+            settings.Add("vr_upscaling_backend", new ConfigSetting(UpscalingBackend, UpscalingPolicy.BackendNames, ConfigSetting.SettingUpdate.Instant, Upscaling.OnSettingChanged));
+            settings.Add("vr_upscaling_preset", new ConfigSetting(UpscalingPreset, UpscalingPolicy.PresetNames, ConfigSetting.SettingUpdate.Instant, Upscaling.OnSettingChanged));
+            settings.Add("vr_upscaling_sharpness", new ConfigSetting(UpscalingSharpness, 0f, 1f, ConfigSetting.SettingUpdate.Instant, Upscaling.OnSettingChanged));
             settings.Add("vr_snap_turn", new ConfigSetting(SnapTurn, ConfigSetting.SettingUpdate.Instant));
             settings.Add("vr_snap_angle", new ConfigSetting(SnapTurnAngle, 30, 180, ConfigSetting.SettingUpdate.Instant));
             settings.Add("vr_snap_delay", new ConfigSetting(SnapTurnHoldDelay, 0.2f, 1, ConfigSetting.SettingUpdate.Instant));
@@ -937,7 +1007,15 @@ namespace VRMod
             internal readonly ConfigEntryBase entry;
             internal readonly float minValue;
             internal readonly float maxValue;
+            /// <summary>For text settings: the values the carousel offers (shown as written).</summary>
+            internal readonly string[] choices;
             internal SettingUpdate settingUpdate;
+
+            internal ConfigSetting(ConfigEntryBase entry, string[] choices, SettingUpdate settingUpdate, EventHandler onChangedCallback = null)
+                : this(entry, settingUpdate, onChangedCallback)
+            {
+                this.choices = choices;
+            }
 
             internal ConfigSetting(ConfigEntryBase entry, SettingUpdate settingUpdate, EventHandler onChangedCallback = null)
             {

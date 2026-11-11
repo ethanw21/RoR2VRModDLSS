@@ -195,7 +195,9 @@ namespace VRMod
 
         private static void AddStereoProjectionFix(On.RoR2.SceneCamera.orig_Awake orig, SceneCamera self)
         {
-            self.gameObject.AddComponent<StereoProjectionFix>();
+            // The upscaling eye cameras are mono and get their projection assigned every frame.
+            if (!UpscalingEye.Activating)
+                self.gameObject.AddComponent<StereoProjectionFix>();
 
             orig(self);
         }

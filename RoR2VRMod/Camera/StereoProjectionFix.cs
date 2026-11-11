@@ -29,6 +29,9 @@ namespace VRMod
         private Camera _childCamera;
         private GameObject _childCameraObject;
 
+        /// <summary>The hidden camera that holds the headset's per-eye projection (null until Start).</summary>
+        internal Camera ReferenceCamera => _childCamera;
+
         private void Awake()
         {
             ParentCamera = GetComponent<Camera>();

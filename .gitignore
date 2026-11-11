@@ -23,6 +23,8 @@
 *.7z
 *.rar
 *.patch
+# The vendored native upscaling library carries reviewed patches for a pinned SDK.
+!/NativeUpscaling/third_party/patches/**/*.patch
 *.bundle
 
 # The patcher needs this manifest at runtime, so it is tracked even though
@@ -103,3 +105,11 @@ _netrc
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# --- Native upscaling library: SDKs fetched at pinned commits, build output ---
+/NativeUpscaling/third_party/Streamline/
+/NativeUpscaling/third_party/FidelityFX-SDK/
+/NativeUpscaling/third_party/FidelityFX-SDK-DX11/
+/NativeUpscaling/third_party/RiskOfRainUpscaling/
+/NativeUpscaling/build/native*/
+/NativeUpscaling/build/package/
