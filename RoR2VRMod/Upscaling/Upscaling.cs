@@ -71,7 +71,7 @@ namespace VRMod
 
         // Frame state.
         private static int presentingFrame = -1, renderedFrame = -1, skippedFrames;
-        private static int passFrame = -1, passIndex, activeEye, eyeOrderFixes;
+        private static int passFrame = -1, passIndex, eyeOrderFixes;
         private static readonly int[] shown = new int[2];
         private static bool stateApplied, realLayerCleared, loggedFirstFrame;
         private static int savedCullingMask;
@@ -730,17 +730,10 @@ namespace VRMod
             EnsureEyesRendered();
         }
 
-        // Called once per eye pass of the scene camera; remembers which eye that pass is for.
         private static void OnPreRender(Camera camera)
         {
             if (presentingFrame != Time.frameCount || eyes == null || !ReferenceEquals(camera, real)) return;
             EnsureEyesRendered();
-            int eye = camera.stereoActiveEye == Camera.MonoOrStereoscopicEye.Right ? 1 : 0;
-            if (passFrame != Time.frameCount) { passFrame = Time.frameCount; passIndex = 0; }
-            else ++passIndex;
-            // Multi-pass stereo draws the left eye first. Should Unity name the left eye for the second pass too, go by the order.
-            if (passIndex == 1 && eye == 0) { eye = 1; ++eyeOrderFixes; }
-            activeEye = eye;
         }
 
         /// <summary>
@@ -757,7 +750,12 @@ namespace VRMod
             UpscalingEye[] current = eyes;
             if (current == null || presentingFrame != Time.frameCount || !ReferenceEquals(layer, realLayer)) return false;
             EnsureEyesRendered();
-            int index = passFrame == Time.frameCount ? activeEye : 0;
+            // Inside an image effect Unity names the eye being drawn. Multi-pass stereo draws the left
+            // eye first, so should it name the left eye for the second pass of a frame too, go by the order.
+            int index = real.stereoActiveEye == Camera.MonoOrStereoscopicEye.Right ? 1 : 0;
+            if (passFrame != Time.frameCount) { passFrame = Time.frameCount; passIndex = 0; }
+            else ++passIndex;
+            if (passIndex == 1 && index == 0) { index = 1; ++eyeOrderFixes; }
             UpscalingEye eye = current[index];
             if (!eye.Output) return false;
             if (profiling) Mark(index == 0 ? "show left eye" : "show right eye");
@@ -886,7 +884,7 @@ namespace VRMod
     {
         private readonly WaitForEndOfFrame endOfFrame = new WaitForEndOfFrame();
 
-        private void OnEnable()
+        private void Start()
         {
             StartCoroutine(EndOfFrames());
         }
