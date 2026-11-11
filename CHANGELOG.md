@@ -2,6 +2,23 @@
 
 This package continues [DrBibop's RoR2VRMod](https://github.com/DrBibop/RoR2VRMod) (MIT), whose own history ends at 2.9.2; its original changelog is kept in the source repository as `CHANGELOG-original-DrBibop.md`. Version numbers restart at 1.0.x for this package.
 
+### 1.2.1
+
+Fixes for upscaling after its first test in a headset (4940x4136 per eye, RTX 5090).
+
+**Fixed**
+- **The right eye stayed black during runs with upscaling on.** Both eyes were being upscaled, but the last step, handing each eye's finished image to the headset, did not reach the right eye. Each image is now handed over inside the scene camera's own image effect chain, and the scene camera keeps its presenting state until the whole frame has been drawn.
+- **Flicking through upscaling settings could freeze the game.** Every stop on a settings carousel built a new pair of upscalers while the previous pair still held its video memory, which at headset resolutions adds up to several gigabytes. A setting is now applied once it has rested for about a second, and the old upscalers are released before the new ones are created.
+- **DLSS switched itself off when video memory ran short.** NVIDIA's runtime reports "over the video memory budget" as a warning; the mod treated it as a failure and turned DLSS off for the rest of the session. It is now logged and upscaling continues.
+
+**New**
+- **Video memory guard:** if the game stays over its video memory budget for five seconds with upscaling on, upscaling pauses itself, the game goes back to full resolution, and a line in the game's chat box says so. Changing any upscaling setting tries again. At very high headset resolutions DLAA and the heaviest DLSS presets may not fit.
+- **Measurements in the log** (`BepInEx/LogOutput.log`, lines starting with `[VR upscaling]`): average and slowest frame time with upscaling on, the average frame time at full resolution before it was turned on, how many frames each eye was shown, video memory use, and a one-time check that both eyes' images are not black.
+- **GPU profile:** for the first minute after upscaling turns on or a setting changes, the GPU time of every step (drawing each eye, post-processing, the upscaler itself, handing the image to the headset) is written to `BepInEx/VRMod-Upscaling/profile.log`. `Upscaling profiler` in the `[Upscaling]` section of `VRMod.cfg` switches this to `Always` or `Off`.
+
+**Known issues**
+- At very high headset resolutions the upscaler itself is expensive: its cost grows with the output size, and the newest DLSS models (presets M and L) cost the most. If the frame rate does not improve, try the preset **K** or **E**, or **FSR 3**, and compare the numbers in the log. Upscaling only the centre of the view (foveated upscaling) is planned for this.
+
 ### 1.2.0
 
 **New**

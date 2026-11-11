@@ -14,10 +14,20 @@ static void RequireUpscaler(HRESULT hr, const char* label) {
     if (FAILED(hr)) { Log(ModLogLevel::Error, "DLSS_FAILED %s HRESULT=0x%08lx", label, hr); throw std::runtime_error(label); }
 }
 static void RequireSL(sl::Result result, const char* label) {
-    if (result != sl::Result::eOk) {
-        Log(ModLogLevel::Error, "DLSS_FAILED %s=%s (%d)", label, sl::getResultAsStr(result), static_cast<int>(result));
-        throw std::runtime_error(label);
+    if (result == sl::Result::eOk) return;
+    // Streamline answers "over the video memory budget" with a warning result: the call itself
+    // was carried out. Failing here would switch DLSS off for the whole session over a state
+    // that passes once memory is released, so it is logged (first time, then every 600th) and
+    // the frame goes on. The plugin watches the adapter's budget and pauses upscaling if it lasts.
+    if (result == sl::Result::eWarnOutOfVRAM) {
+        static std::atomic<unsigned> warnings{0};
+        const unsigned count = ++warnings;
+        if (count == 1 || count % 600 == 0)
+            Log(ModLogLevel::Warning, "DLSS_VRAM_WARNING %s=eWarnOutOfVRAM count=%u; video memory is over budget, the call completed and upscaling continues", label, count);
+        return;
     }
+    Log(ModLogLevel::Error, "DLSS_FAILED %s=%s (%d)", label, sl::getResultAsStr(result), static_cast<int>(result));
+    throw std::runtime_error(label);
 }
 static void CLog(sl::LogType type, const char* message) {
     Log(type == sl::LogType::eError ? ModLogLevel::Error : type == sl::LogType::eWarn ? ModLogLevel::Warning : ModLogLevel::Debug,

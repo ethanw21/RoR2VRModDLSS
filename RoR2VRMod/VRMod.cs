@@ -14,7 +14,7 @@ using UnityEngine.XR.OpenXR.Features;
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
 namespace VRMod
 {
-    [BepInPlugin("com.DrBibop.VRMod", "Resurrected VRMod", "1.2.0")]
+    [BepInPlugin("com.DrBibop.VRMod", "Resurrected VRMod", "1.2.1")]
     [BepInDependency("com.Moffein.BanditTweaks", BepInDependency.DependencyFlags.SoftDependency)]
     public class VRMod : BaseUnityPlugin
     {

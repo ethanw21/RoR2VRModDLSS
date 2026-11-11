@@ -22,10 +22,11 @@ namespace VRMod
     ///   2. When the scene camera is about to render its first eye, both eye cameras
     ///      (UpscalingEye) render the world at the reduced size from the headset's per-eye pose
     ///      and projection, and the native library upscales each one to the full eye size.
-    ///   3. For each eye pass, the scene camera copies that eye's upscaled image into its target.
-    ///      Its remaining image effects (outlines, UI blur source) and the HUD camera then run at
-    ///      full resolution on top, exactly as before.
-    ///   4. After the last eye pass the scene camera gets its own settings back.
+    ///   3. For each eye pass, the scene camera's first image effect (its post-processing layer,
+    ///      see UpscalingHooks.LayerRenderImage) hands that eye's upscaled image on instead of the
+    ///      empty picture the presenter drew. Its remaining image effects (outlines, UI blur
+    ///      source) and the HUD camera then run at full resolution on top, exactly as before.
+    ///   4. At the end of the frame the scene camera gets its own settings back.
     ///
     /// The native library is the one from Risk of Rain Upscaling by Xander Frangos (MIT), built
     /// from the NativeUpscaling folder with per-eye support. VRPatcher loads it before the game
@@ -37,8 +38,16 @@ namespace VRMod
         private const int SettleFrames = 10;
         private const float MipBiasOffset = -1f; // DLSS guide 3.5
         private const string StandalonePreloader = "RiskOfRainUpscaling.Preloader.dll";
-        // Where the game's own post-processing writes its finished image; the upscaled eye takes its place.
-        private const CameraEvent PresentEvent = CameraEvent.BeforeImageEffects;
+        // A setting has to rest this long before it is applied, so flicking through a carousel
+        // does not build and tear down an upscaler for every stop on the way.
+        private const float SettleSeconds = 0.75f;
+        // Frames between the old upscalers being released and new ones being created (the
+        // graphics driver frees memory a little after the release).
+        private const int ReleaseFrames = 3;
+        private const float ReleaseTimeoutSeconds = 10f;
+        // Sustained time over the video memory budget before upscaling pauses itself.
+        private const int OverBudgetSeconds = 5;
+        private const float ProfileSeconds = 60f;
         internal const string LogFolderName = "VRMod-Upscaling";
 
         private static ManualLogSource Log => VRMod.StaticLogger;
@@ -55,7 +64,6 @@ namespace VRMod
         private static PostProcessLayer realLayer;
         private static SceneCamera realSceneCamera;
         private static StereoProjectionFix projectionFix;
-        private static CommandBuffer presenter;
         private static UpscalingQuality attachedQuality;
         private static UpscalingBackend attachedBackend;
         private static UpscalingDlssPreset attachedPreset;
@@ -63,6 +71,8 @@ namespace VRMod
 
         // Frame state.
         private static int presentingFrame = -1, renderedFrame = -1, skippedFrames;
+        private static int passFrame = -1, passIndex, activeEye, eyeOrderFixes;
+        private static readonly int[] shown = new int[2];
         private static bool stateApplied, realLayerCleared, loggedFirstFrame;
         private static int savedCullingMask;
         private static CameraClearFlags savedClearFlags;
@@ -78,6 +88,20 @@ namespace VRMod
         private static volatile string failure;
         private static string lastBlocked;
         private static float nextStats;
+
+        // Setting changes and the hand-over from one set of upscalers to the next.
+        private static float lastSettingChange = -100f, retiringSince = -1f;
+        private static int releasedFrame = -100;
+        private static bool warnedRelease;
+
+        // Measurements for the log.
+        private static double onSeconds, offSeconds, gpuSeconds;
+        private static int onFrames, offFrames, gpuFrames;
+        private static float onWorst, nextMemoryCheck, probeAt = -1f, profileUntil = -1f;
+        private static int overBudget;
+        private static bool guardMemory, profiling;
+        private static IntPtr memoryProbe;
+        private static CommandBuffer marker;
 
         // ---------------------------------------------------------------- startup
 
@@ -99,7 +123,6 @@ namespace VRMod
                 UpscalingHooks.Install();
                 Camera.onPreCull += OnPreCull;
                 Camera.onPreRender += OnPreRender;
-                Camera.onPostRender += OnPostRender;
                 Application.onBeforeRender += OnBeforeRender;
                 var driver = new GameObject("VR Upscaling Driver") { hideFlags = HideFlags.HideAndDontSave };
                 UnityEngine.Object.DontDestroyOnLoad(driver);
@@ -206,6 +229,7 @@ namespace VRMod
             suspended = false;
             autoKind = 0;
             lastBlocked = null;
+            lastSettingChange = Time.unscaledTime;
             ApplySharpness();
         }
 
@@ -225,18 +249,20 @@ namespace VRMod
 
         private static void TickInternal()
         {
-            RestoreRealCamera(); // normally already done after the last eye pass
+            RestoreRealCamera(); // normally already done at the end of the last frame
+            MeasureFrame();
             CollectRetired();
             string failed = failure;
             if (failed != null) { failure = null; Suspend(failed); return; }
-            if (!ModConfig.UpscalingEnabled.Value) { Detach("turned off"); candidate = null; return; }
-            if (suspended) return;
+            if (!ModConfig.UpscalingEnabled.Value) { Detach("turned off"); candidate = null; MeasureFullResolution(FindRig(out _) != null); return; }
+            if (suspended) { MeasureFullResolution(FindRig(out _) != null); return; }
 
             CameraRigController found = FindRig(out string blocked);
-            if (found == null) { Block(blocked); candidate = null; return; }
+            if (found == null) { Block(blocked); candidate = null; MeasureFullResolution(false); return; }
             if (eyes != null && (found != rig || found.sceneCam != real)) Detach("the scene camera changed");
             if (eyes == null)
             {
+                MeasureFullResolution(true);
                 // Give a new camera rig a few frames to finish its own setup first.
                 if (found != candidate) { candidate = found; waitFrames = 0; }
                 if (++waitFrames < SettleFrames) return;
@@ -266,6 +292,10 @@ namespace VRMod
 
             if (eyes == null)
             {
+                // One set of upscalers at a time. The old ones have to be gone before new ones are
+                // created, or both sets hold video memory at once (at headset resolutions that is
+                // several gigabytes), and a setting still being flicked through is not applied yet.
+                if (!ReadyToAttach()) return;
                 Attach(found, outputWidth, outputHeight, renderWidth, renderHeight, quality, backend, preset);
                 return;
             }
@@ -278,7 +308,29 @@ namespace VRMod
             if (!eyes[0].Alive || !eyes[1].Alive) { Detach("an eye camera was destroyed"); return; }
 
             UpscalingSceneFixups.Tick();
-            if (Time.unscaledTime >= nextStats) LogStats();
+            float now = Time.unscaledTime;
+            if (profiling && profileUntil >= 0 && now >= profileUntil) SetProfiling(false, null);
+            if (probeAt >= 0 && now >= probeAt) { probeAt = -1f; ProbeOutputs(); }
+            if (now >= nextMemoryCheck && !CheckVideoMemory(now)) return;
+            if (now >= nextStats) LogStats();
+        }
+
+        private static bool ReadyToAttach()
+        {
+            float now = Time.unscaledTime;
+            if (retiring.Count > 0)
+            {
+                if (retiringSince < 0) retiringSince = now;
+                if (now - retiringSince < ReleaseTimeoutSeconds) { releasedFrame = Time.frameCount; return false; }
+                if (!warnedRelease)
+                {
+                    warnedRelease = true;
+                    Log.LogWarning(Tag + "The previous upscalers were not released within " + ReleaseTimeoutSeconds.ToString("0", CultureInfo.InvariantCulture) + " seconds; starting the new ones anyway.");
+                }
+            }
+            else retiringSince = -1f;
+            if (Time.frameCount - releasedFrame < ReleaseFrames) return false;
+            return now - lastSettingChange >= SettleSeconds;
         }
 
         /// <summary>The one camera rig upscaling can attach to right now, or null and why not.</summary>
@@ -304,6 +356,9 @@ namespace VRMod
                 if (!attached && camera.actualRenderingPath != RenderingPath.DeferredShading) { reason = "the scene camera is not using deferred shading"; continue; }
                 if (current.isCutscene) { reason = "a cutscene is playing"; continue; }
                 if (current.skyboxCam && current.skyboxCam.isActiveAndEnabled) { reason = "the rig uses a separate skybox camera"; continue; }
+                // The upscaled eyes are handed to the headset through the scene camera's post-processing layer.
+                PostProcessLayer layer = attached ? realLayer : camera.GetComponent<PostProcessLayer>();
+                if (!layer || !layer.isActiveAndEnabled) { reason = "the scene camera has no active post-processing layer"; continue; }
                 ++count; found = current;
             }
             if (count == 1) return found;
@@ -323,6 +378,9 @@ namespace VRMod
             UpscalingQuality quality, UpscalingBackend backend, UpscalingDlssPreset preset)
         {
             Camera source = newRig.sceneCam;
+            // Measured before anything is allocated. Over budget before upscaling even starts is not something pausing it would cure.
+            bool memoryKnown = QueryVideoMemory(out double budgetMb, out double usedMb);
+            guardMemory = memoryKnown && usedMb <= budgetMb;
             var created = new UpscalingEye[2];
             try
             {
@@ -351,21 +409,38 @@ namespace VRMod
             realSceneCamera = source.GetComponent<SceneCamera>();
             projectionFix = source.GetComponent<StereoProjectionFix>();
             attachedQuality = quality; attachedBackend = backend; attachedPreset = preset;
-            presenter = new CommandBuffer { name = "VRMod.Upscaling.Present" };
-            real.AddCommandBuffer(PresentEvent, presenter);
-            presentingFrame = renderedFrame = -1; skippedFrames = 0; loggedFirstFrame = false; lastBlocked = null;
-            nextStats = Time.unscaledTime + 5f;
+            presentingFrame = renderedFrame = passFrame = -1; skippedFrames = 0; loggedFirstFrame = false; lastBlocked = null;
+            shown[0] = shown[1] = 0; eyeOrderFixes = 0; warnedRelease = false;
+            float now = Time.unscaledTime;
+            nextStats = now + 5f;
+            probeAt = now + 3f;
+            nextMemoryCheck = now + 1f;
+            overBudget = 0;
 
             float mipBias = UpscalingPolicy.MipBias(renderWidth, outputWidth, MipBiasOffset);
             UpscalingSceneFixups.Begin(mipBias);
 
             var components = new List<string>();
             foreach (MonoBehaviour behaviour in source.GetComponents<MonoBehaviour>()) if (behaviour) components.Add(behaviour.GetType().Name + (behaviour.enabled ? "" : "(off)"));
-            Log.LogInfo(Tag + "On: " + UpscalingPolicy.QualityNames[(int)quality] + ", each eye renders " + renderWidth + "x" + renderHeight + " and is upscaled to " + outputWidth + "x" + outputHeight +
+            string mode = UpscalingPolicy.QualityNames[(int)quality] + ", each eye renders " + renderWidth + "x" + renderHeight + " and is upscaled to " + outputWidth + "x" + outputHeight +
                 " (" + (100.0 * renderWidth / outputWidth).ToString("0", CultureInfo.InvariantCulture) + "% per axis). Upscaler: " + UpscalingPolicy.BackendNames[BackendIndex(backend)] +
-                ", DLSS preset: " + UpscalingPolicy.PresetNames[(int)preset] + ", sharpening: " + ModConfig.UpscalingSharpness.Value.ToString("0.00", CultureInfo.InvariantCulture) +
-                ", texture mip bias: " + mipBias.ToString("0.00", CultureInfo.InvariantCulture) + ". Scene: " + source.gameObject.scene.name +
-                ". Scene camera pixels: " + source.pixelWidth + "x" + source.pixelHeight + ", HDR " + source.allowHDR + ". Scene camera components: " + string.Join(", ", components.ToArray()) + ".");
+                ", DLSS preset: " + UpscalingPolicy.PresetNames[(int)preset] + ", sharpening: " + ModConfig.UpscalingSharpness.Value.ToString("0.00", CultureInfo.InvariantCulture);
+            Log.LogInfo(Tag + "On: " + mode + ", texture mip bias: " + mipBias.ToString("0.00", CultureInfo.InvariantCulture) + ". Scene: " + source.gameObject.scene.name +
+                ". Scene camera pixels: " + source.pixelWidth + "x" + source.pixelHeight + ", HDR " + source.allowHDR +
+                ", final blit to camera target " + (realLayer ? realLayer.finalBlitToCameraTarget.ToString() : "n/a") +
+                ". Video memory before starting: " + (memoryKnown ? Megabytes(usedMb) + " of " + Megabytes(budgetMb) + " MB budget in use" : "unknown") +
+                ". Scene camera components: " + string.Join(", ", components.ToArray()) + ".");
+            if (offFrames > 0 && offSeconds >= 5)
+                Log.LogInfo(Tag + "Before turning on, the game averaged " + FrameTime(offSeconds, offFrames) + " over " + offSeconds.ToString("0", CultureInfo.InvariantCulture) + " seconds of this run at full resolution.");
+            ResetMeasurements();
+
+            string profiler = (ModConfig.UpscalingProfiler.Value ?? "").Trim();
+            bool always = string.Equals(profiler, "Always", StringComparison.OrdinalIgnoreCase);
+            if (always || string.Equals(profiler, "Start", StringComparison.OrdinalIgnoreCase))
+            {
+                SetProfiling(true, mode);
+                profileUntil = always ? -1f : now + ProfileSeconds;
+            }
         }
 
         private static int BackendIndex(UpscalingBackend backend) => backend == UpscalingBackend.DLSS ? 1 : backend == UpscalingBackend.FSR3 ? 2 : 0;
@@ -377,8 +452,9 @@ namespace VRMod
             LogStats();
             RestoreRealCamera();
             eyes = null;
-            if (real && presenter != null) real.RemoveCommandBuffer(PresentEvent, presenter);
-            presenter?.Release(); presenter = null;
+            SetProfiling(false, null);
+            probeAt = -1f;
+            ResetMeasurements();
             // The scene camera's own post-processing was emptied while presenting; make it rebuild.
             if (realLayerCleared && realLayer) realLayer.OnGlobalVolumesDirty();
             realLayerCleared = false;
@@ -389,7 +465,8 @@ namespace VRMod
                 retiring.Add(eye);
             }
             rig = null; real = null; realLayer = null; realSceneCamera = null; projectionFix = null;
-            presentingFrame = renderedFrame = -1; waitFrames = 0;
+            presentingFrame = renderedFrame = passFrame = -1; waitFrames = 0;
+            releasedFrame = Time.frameCount; retiringSince = -1f;
             UpscalingSceneFixups.End();
             Log.LogInfo(Tag + "Off: " + reason + ". The scene camera renders normally again.");
         }
@@ -399,6 +476,12 @@ namespace VRMod
             Detach("stopped after a problem");
             suspended = true;
             Log.LogError(Tag + "Stopped: " + reason + ". The game keeps rendering at full resolution and the saved settings are kept. Changing any upscaling setting in the VR tab tries again.");
+            // The log is out of sight in a headset; say it in the game's chat box too.
+            try
+            {
+                if (Run.instance) Chat.AddMessage("<color=#e5c962>VR upscaling paused.</color> The game is back at full resolution. Changing an upscaling setting tries again; the reason is in the BepInEx log.");
+            }
+            catch (Exception e) { Log.LogDebug(Tag + "Chat notice failed: " + e.Message); }
         }
 
         /// <summary>Called from render callbacks, where nothing may be torn down; Tick handles it next frame.</summary>
@@ -427,12 +510,159 @@ namespace VRMod
             Log.LogInfo(Tag + "Status: " + UpscalingNative.UpscalerName(UpscalingNative.UpscalerKind(left.Context)) +
                 ", native state left " + left.State + " / right " + right.State + " (2 = upscaling), frames " + left.Renders +
                 ", upscaled left " + left.Evaluations + " / right " + right.Evaluations +
+                ", shown in the headset left " + shown[0] + " / right " + shown[1] + (eyeOrderFixes > 0 ? " (eye order corrected " + eyeOrderFixes + " times)" : "") +
                 ", history resets left " + left.Resets + " / right " + right.Resets +
-                ", CPU time for both eye renders " + perFrame.ToString("0.00", CultureInfo.InvariantCulture) + " ms per frame.");
+                ", average frame " + (onFrames > 0 ? FrameTime(onSeconds, onFrames) + ", slowest " + (onWorst * 1000f).ToString("0.0", CultureInfo.InvariantCulture) + " ms" : "n/a") +
+                (gpuFrames > 0 ? ", GPU time reported by the headset runtime " + (gpuSeconds * 1000.0 / gpuFrames).ToString("0.00", CultureInfo.InvariantCulture) + " ms" : "") +
+                ", CPU time for both eye renders " + perFrame.ToString("0.00", CultureInfo.InvariantCulture) + " ms per frame" +
+                (QueryVideoMemory(out double budgetMb, out double usedMb) ? ", video memory " + Megabytes(usedMb) + " of " + Megabytes(budgetMb) + " MB budget" : "") + ".");
             left.RenderMilliseconds = right.RenderMilliseconds = 0;
             left.Renders = right.Renders = 0;
             left.Evaluations = right.Evaluations = 0;
             left.Resets = right.Resets = 0;
+            shown[0] = shown[1] = 0; eyeOrderFixes = 0;
+            onSeconds = 0; onFrames = 0; onWorst = 0; gpuSeconds = 0; gpuFrames = 0;
+        }
+
+        // ---------------------------------------------------------------- measurements
+
+        /// <summary>Frame times while upscaling is on.</summary>
+        private static void MeasureFrame()
+        {
+            if (eyes == null) return;
+            float delta = Time.unscaledDeltaTime;
+            if (delta <= 0) return;
+            if (delta > onWorst) onWorst = delta;
+            if (delta > 1f) return; // a loading hitch would swamp the average
+            onSeconds += delta; ++onFrames;
+            if (XRStats.TryGetGPUTimeLastFrame(out float gpu) && gpu > 0) { gpuSeconds += gpu; ++gpuFrames; }
+        }
+
+        /// <summary>
+        /// Frame times of the same kind of scene at full resolution, for comparison: only frames in
+        /// which upscaling could have been on (a run, the gameplay camera, the headset active).
+        /// </summary>
+        private static void MeasureFullResolution(bool comparable)
+        {
+            if (!Run.instance) { offSeconds = 0; offFrames = 0; return; }
+            float delta = Time.unscaledDeltaTime;
+            if (!comparable || eyes != null || delta <= 0 || delta > 1f) return;
+            offSeconds += delta; ++offFrames;
+        }
+
+        private static void ResetMeasurements()
+        {
+            onSeconds = offSeconds = gpuSeconds = 0;
+            onFrames = offFrames = gpuFrames = 0;
+            onWorst = 0;
+        }
+
+        private static string FrameTime(double seconds, int frames)
+        {
+            double milliseconds = 1000.0 * seconds / Math.Max(1, frames);
+            return milliseconds.ToString("0.0", CultureInfo.InvariantCulture) + " ms (" + (1000.0 / Math.Max(0.001, milliseconds)).ToString("0", CultureInfo.InvariantCulture) + " fps)";
+        }
+
+        private static string Megabytes(double value) => value.ToString("0", CultureInfo.InvariantCulture);
+
+        /// <summary>This process's video memory budget and use, from the graphics adapter. False when unknown.</summary>
+        private static bool QueryVideoMemory(out double budgetMb, out double usedMb)
+        {
+            budgetMb = usedMb = 0;
+            if (UpscalingNative.QueryVideoMemory == null) return false;
+            try
+            {
+                // Any texture of the game's graphics device identifies the adapter.
+                if (memoryProbe == IntPtr.Zero) memoryProbe = Texture2D.whiteTexture.GetNativeTexturePtr();
+                if (memoryProbe == IntPtr.Zero || UpscalingNative.QueryVideoMemory(memoryProbe, out ulong budget, out ulong used) != 0 || budget == 0) return false;
+                budgetMb = budget / 1048576.0; usedMb = used / 1048576.0;
+                return true;
+            }
+            catch (Exception e)
+            {
+                Log.LogDebug(Tag + "Video memory query failed: " + e.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Past its video memory budget, Windows starts moving textures to system memory and the
+        /// game stalls for seconds at a time. When that lasts, upscaling pauses instead. False when it paused.
+        /// </summary>
+        private static bool CheckVideoMemory(float now)
+        {
+            nextMemoryCheck = now + 1f;
+            if (!guardMemory || !QueryVideoMemory(out double budgetMb, out double usedMb)) return true;
+            if (usedMb <= budgetMb) { overBudget = 0; return true; }
+            if (++overBudget < OverBudgetSeconds) return true;
+            Suspend("video memory is over budget with this mode (" + Megabytes(usedMb) + " MB in use, " + Megabytes(budgetMb) + " MB available to the game). " +
+                "Choose a lighter quality mode or DLSS preset, or lower the headset's render resolution");
+            return false;
+        }
+
+        /// <summary>
+        /// One-time check a few seconds after starting: is each eye's upscaled image there at all?
+        /// Reads a handful of points back from each one (a small, one-off stall).
+        /// </summary>
+        private static void ProbeOutputs()
+        {
+            if (eyes == null) return;
+            RenderTexture small = null;
+            Texture2D pixels = null;
+            RenderTexture previous = RenderTexture.active;
+            try
+            {
+                small = RenderTexture.GetTemporary(8, 8, 0, RenderTextureFormat.ARGBHalf, RenderTextureReadWrite.Linear);
+                pixels = new Texture2D(8, 8, TextureFormat.RGBAHalf, false, true);
+                var parts = new List<string>();
+                foreach (UpscalingEye eye in eyes)
+                {
+                    foreach (RenderTexture texture in new[] { eye.Color, eye.Output })
+                    {
+                        if (!texture) continue;
+                        Graphics.Blit(texture, small);
+                        RenderTexture.active = small;
+                        pixels.ReadPixels(new Rect(0, 0, 8, 8), 0, 0, false);
+                        float sum = 0; int bad = 0;
+                        foreach (Color color in pixels.GetPixels())
+                        {
+                            float value = 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
+                            if (float.IsNaN(value) || float.IsInfinity(value)) { ++bad; continue; }
+                            sum += value;
+                        }
+                        parts.Add(eye.Name + (ReferenceEquals(texture, eye.Output) ? " upscaled " : " rendered ") + (sum / 64f).ToString("0.000", CultureInfo.InvariantCulture) + (bad > 0 ? " (" + bad + " invalid points)" : ""));
+                    }
+                }
+                Log.LogInfo(Tag + "Image check, average brightness of 64 points (0 = black): " + string.Join(", ", parts.ToArray()) + ".");
+            }
+            catch (Exception e) { Log.LogInfo(Tag + "Image check could not run: " + e.Message); }
+            finally
+            {
+                RenderTexture.active = previous;
+                if (small) RenderTexture.ReleaseTemporary(small);
+                if (pixels) UnityEngine.Object.Destroy(pixels);
+            }
+        }
+
+        /// <summary>The native GPU profiler: per-step GPU times, written to profile.log every two seconds while on.</summary>
+        private static void SetProfiling(bool on, string description)
+        {
+            if (profiling == on) return;
+            if (!UpscalingProfiler.Available) return;
+            try
+            {
+                if (on)
+                {
+                    UpscalingNative.ProfilerSetContext(description ?? "");
+                    Log.LogInfo(Tag + "Recording the GPU time of each upscaling step to " + Path.Combine(Paths.BepInExRootPath, LogFolderName, "profile.log") +
+                        (string.Equals((ModConfig.UpscalingProfiler.Value ?? "").Trim(), "Always", StringComparison.OrdinalIgnoreCase) ? "." : " for the next " + ProfileSeconds.ToString("0", CultureInfo.InvariantCulture) + " seconds."));
+                }
+                UpscalingNative.ProfilerSetEnabled(on ? 1 : 0);
+                profiling = on;
+                UpscalingProfiler.Active = on;
+                if (!on) profileUntil = -1f;
+            }
+            catch (Exception e) { Log.LogDebug(Tag + "Profiler switch failed: " + e.Message); }
         }
 
         // ---------------------------------------------------------------- frame: presenter state
@@ -480,7 +710,6 @@ namespace VRMod
         {
             if (!stateApplied) return;
             stateApplied = false;
-            presenter?.Clear();
             if (!real) return;
             real.cullingMask = savedCullingMask;
             real.clearFlags = savedClearFlags;
@@ -501,22 +730,56 @@ namespace VRMod
             EnsureEyesRendered();
         }
 
+        // Called once per eye pass of the scene camera; remembers which eye that pass is for.
         private static void OnPreRender(Camera camera)
         {
-            if (presentingFrame != Time.frameCount || eyes == null || presenter == null || !ReferenceEquals(camera, real)) return;
+            if (presentingFrame != Time.frameCount || eyes == null || !ReferenceEquals(camera, real)) return;
             EnsureEyesRendered();
-            UpscalingEye eye = eyes[camera.stereoActiveEye == Camera.MonoOrStereoscopicEye.Right ? 1 : 0];
-            presenter.Clear();
-            if (ModConfig.UpscalingFlip.Value) presenter.Blit(eye.Output, BuiltinRenderTextureType.CameraTarget, new Vector2(1, -1), new Vector2(0, 1));
-            else presenter.Blit(eye.Output, BuiltinRenderTextureType.CameraTarget);
-            presenter.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
+            int eye = camera.stereoActiveEye == Camera.MonoOrStereoscopicEye.Right ? 1 : 0;
+            if (passFrame != Time.frameCount) { passFrame = Time.frameCount; passIndex = 0; }
+            else ++passIndex;
+            // Multi-pass stereo draws the left eye first. Should Unity name the left eye for the second pass too, go by the order.
+            if (passIndex == 1 && eye == 0) { eye = 1; ++eyeOrderFixes; }
+            activeEye = eye;
         }
 
-        private static void OnPostRender(Camera camera)
+        /// <summary>
+        /// The scene camera's first image effect, for the eye pass being drawn: hands on that eye's
+        /// upscaled image in place of the empty picture the presenter drew. The effects after it
+        /// (outlines and so on) work on that image. False when this frame is not presented.
+        ///
+        /// This is the image effect chain itself, so the image lands wherever Unity expects this
+        /// pass's picture, for either eye. Nothing here may depend on state that a camera callback
+        /// changes between a pass being set up and its image effects running.
+        /// </summary>
+        internal static bool Present(PostProcessLayer layer, RenderTexture destination)
         {
-            if (!stateApplied || !ReferenceEquals(camera, real)) return;
-            if (camera.stereoActiveEye == Camera.MonoOrStereoscopicEye.Left) return; // the right eye still follows
-            RestoreRealCamera();
+            UpscalingEye[] current = eyes;
+            if (current == null || presentingFrame != Time.frameCount || !ReferenceEquals(layer, realLayer)) return false;
+            EnsureEyesRendered();
+            int index = passFrame == Time.frameCount ? activeEye : 0;
+            UpscalingEye eye = current[index];
+            if (!eye.Output) return false;
+            if (profiling) Mark(index == 0 ? "show left eye" : "show right eye");
+            if (ModConfig.UpscalingFlip.Value) Graphics.Blit(eye.Output, destination, new Vector2(1, -1), new Vector2(0, 1));
+            else Graphics.Blit(eye.Output, destination);
+            ++shown[index];
+            return true;
+        }
+
+        private static void Mark(string label)
+        {
+            if (marker == null) marker = new CommandBuffer { name = "VRMod.Upscaling.Mark" };
+            marker.Clear();
+            UpscalingProfiler.Mark(marker, label);
+            Graphics.ExecuteCommandBuffer(marker);
+        }
+
+        /// <summary>After every camera has rendered: the scene camera gets its own settings back.</summary>
+        internal static void EndOfFrame()
+        {
+            try { RestoreRealCamera(); }
+            catch (Exception e) { Fail("could not restore the scene camera: " + e.Message); }
         }
 
         /// <summary>Renders both eyes once per frame, from whichever scene camera callback comes first.</summary>
@@ -618,12 +881,28 @@ namespace VRMod
         }
     }
 
-    /// <summary>Runs the upscaling state machine once per frame.</summary>
+    /// <summary>Runs the upscaling state machine once per frame and closes each frame.</summary>
     internal sealed class UpscalingDriver : MonoBehaviour
     {
+        private readonly WaitForEndOfFrame endOfFrame = new WaitForEndOfFrame();
+
+        private void OnEnable()
+        {
+            StartCoroutine(EndOfFrames());
+        }
+
         private void Update()
         {
             Upscaling.Tick();
+        }
+
+        private System.Collections.IEnumerator EndOfFrames()
+        {
+            while (true)
+            {
+                yield return endOfFrame;
+                Upscaling.EndOfFrame();
+            }
         }
     }
 }

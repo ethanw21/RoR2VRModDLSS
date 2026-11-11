@@ -23,3 +23,6 @@ extern std::wstring g_logFolder, g_runtimeFolder;
 extern "C" __declspec(dllexport) int __cdecl RiskOfRainUpscaling_Initialize(const wchar_t*, const wchar_t*, const wchar_t*);
 extern "C" __declspec(dllexport) int __cdecl RiskOfRainUpscaling_GetObservedDeviceCount();
 extern "C" __declspec(dllexport) void __cdecl RiskOfRainUpscaling_SetLoggingLevel(int);
+// This process's video memory budget and current use on the adapter that owns the given
+// D3D11 resource (any texture of the game's device), in bytes. 0 on success, -1 when unknown.
+extern "C" __declspec(dllexport) int __cdecl RiskOfRainUpscaling_QueryVideoMemory(void* resource, unsigned long long* budgetBytes, unsigned long long* usedBytes);

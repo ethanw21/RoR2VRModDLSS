@@ -41,6 +41,12 @@ namespace VRMod
         internal delegate IntPtr UpscalerCreateDelegate(ref UpscalerDescription description);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         internal delegate int UpscalerSubmitDelegate(IntPtr context, ref CameraFrame frame);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate int VideoMemoryQuery(IntPtr resource, out ulong budgetBytes, out ulong usedBytes);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi, BestFitMapping = false)]
+        internal delegate void TextAction([MarshalAs(UnmanagedType.LPStr)] string value);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi, BestFitMapping = false)]
+        internal delegate int TextQuery([MarshalAs(UnmanagedType.LPStr)] string value);
 
         [StructLayout(LayoutKind.Sequential)]
         internal struct Matrix16
@@ -92,6 +98,12 @@ namespace VRMod
         internal static ContextAction UpscalerDestroy;
         internal static IntSetter SetUpscalerBackend, SetDlssPreset;
         internal static FloatSetter SetSharpness;
+        // Diagnostics. Optional: null when the loaded library is older than this plugin.
+        internal static VideoMemoryQuery QueryVideoMemory;
+        internal static IntAction ProfilerSetEnabled;
+        internal static TextAction ProfilerSetContext;
+        internal static TextQuery ProfilerRegister;
+        internal static EventGetter ProfilerGetEvent;
 
         private static IntPtr module;
         internal static bool Loaded => module != IntPtr.Zero;
@@ -134,6 +146,11 @@ namespace VRMod
                 Bind(handle, out SetUpscalerBackend, nameof(SetUpscalerBackend));
                 Bind(handle, out SetDlssPreset, nameof(SetDlssPreset));
                 Bind(handle, out SetSharpness, nameof(SetSharpness));
+                BindOptional(handle, out QueryVideoMemory, nameof(QueryVideoMemory));
+                BindOptional(handle, out ProfilerSetEnabled, nameof(ProfilerSetEnabled));
+                BindOptional(handle, out ProfilerSetContext, nameof(ProfilerSetContext));
+                BindOptional(handle, out ProfilerRegister, nameof(ProfilerRegister));
+                BindOptional(handle, out ProfilerGetEvent, nameof(ProfilerGetEvent));
             }
             catch
             {
@@ -148,6 +165,12 @@ namespace VRMod
             IntPtr pointer = GetProcAddress(handle, "RiskOfRainUpscaling_" + name);
             if (pointer == IntPtr.Zero) throw new EntryPointNotFoundException("RiskOfRainUpscaling_" + name);
             field = Marshal.GetDelegateForFunctionPointer<T>(pointer);
+        }
+
+        private static void BindOptional<T>(IntPtr handle, out T field, string name) where T : Delegate
+        {
+            IntPtr pointer = GetProcAddress(handle, "RiskOfRainUpscaling_" + name);
+            field = pointer == IntPtr.Zero ? null : Marshal.GetDelegateForFunctionPointer<T>(pointer);
         }
     }
 }

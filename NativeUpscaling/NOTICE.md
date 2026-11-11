@@ -15,7 +15,8 @@ not do.
 
 | File | Change |
 | --- | --- |
-| `native/Upscaling/DlssUpscaler.cpp` | Each DLSS feature takes its own Streamline viewport id instead of the fixed viewport 1, so the left and right eye keep separate DLSS history. A separate Streamline project id is used. |
+| `native/Upscaling/DlssUpscaler.cpp` | Each DLSS feature takes its own Streamline viewport id instead of the fixed viewport 1, so the left and right eye keep separate DLSS history. A separate Streamline project id is used. Streamline's `eWarnOutOfVRAM` result is logged as a warning instead of failing the upscaler. |
+| `native/Core/Native.cpp`, `native/Core/Native.h` | New export `RiskOfRainUpscaling_QueryVideoMemory`: the process's video memory budget and use on the game's graphics adapter. |
 | `native/FrameGeneration/FrameBridge.cpp` | Frame generation is never enabled and the standalone mod's config file is not read. |
 | `native/CMakeLists.txt` | The library is named `VRMod.Upscaling.Native.dll`. Upstream's native tests and their shader fixture are not built. |
 | `build/Build-Native.ps1`, `build/Fetch-Runtime.ps1` | New. Build the library and gather the NVIDIA runtime files and license texts for the VR mod package. |

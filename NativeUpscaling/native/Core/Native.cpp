@@ -67,3 +67,17 @@ extern "C" int __cdecl RiskOfRainUpscaling_Initialize(const wchar_t* logs, const
 }
 
 extern "C" int __cdecl RiskOfRainUpscaling_GetObservedDeviceCount() { return ObservedDeviceCount(); }
+
+// Safe from any thread: only free-threaded device and DXGI calls, nothing on the immediate context.
+extern "C" int __cdecl RiskOfRainUpscaling_QueryVideoMemory(void* resource, unsigned long long* budgetBytes, unsigned long long* usedBytes)
+{
+    if (!resource || !budgetBytes || !usedBytes) return -1;
+    ComPtr<ID3D11Device> device;
+    static_cast<ID3D11Resource*>(resource)->GetDevice(&device);
+    ComPtr<IDXGIDevice> dxgi; ComPtr<IDXGIAdapter> adapter; ComPtr<IDXGIAdapter3> adapter3;
+    if (!device || FAILED(device.As(&dxgi)) || FAILED(dxgi->GetAdapter(&adapter)) || !adapter || FAILED(adapter.As(&adapter3))) return -1;
+    DXGI_QUERY_VIDEO_MEMORY_INFO info{};
+    if (FAILED(adapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info))) return -1;
+    *budgetBytes = info.Budget; *usedBytes = info.CurrentUsage;
+    return 0;
+}

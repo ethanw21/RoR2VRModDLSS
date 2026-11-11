@@ -40,7 +40,7 @@ namespace VRMod
         internal int Renders, Evaluations, Resets;
 
         private readonly List<RenderTexture> textures = new List<RenderTexture>();
-        private CommandBuffer geometry, inputs, tail;
+        private CommandBuffer geometry, inputs, tail, started, lit;
         private UpscalingEyeTail tailComponent;
         private bool layerActive;
         private int jitterPhases;
@@ -182,11 +182,21 @@ namespace VRMod
             // The game's post-processing keeps its command buffers until something marks them dirty.
             if (layerActive) Layer.OnGlobalVolumesDirty();
 
+            // Profiler marks (UpscalingProfiler) split this eye's GPU time into its stages.
+            started = new CommandBuffer { name = "VRMod.Upscaling.BeforeGBuffer" };
+            UpscalingProfiler.Mark(started, Name + " eye: start");
+            Camera.AddCommandBuffer(CameraEvent.BeforeGBuffer, started);
+
             geometry = new CommandBuffer { name = "VRMod.Upscaling.AfterGBuffer" };
             geometry.IssuePluginEventAndData(UpscalingNative.SceneInputsGetEvent(), 90, Inputs);
             Camera.AddCommandBuffer(CameraEvent.AfterGBuffer, geometry);
 
+            lit = new CommandBuffer { name = "VRMod.Upscaling.AfterLighting" };
+            UpscalingProfiler.Mark(lit, Name + " eye: shadows and lighting drawn");
+            Camera.AddCommandBuffer(CameraEvent.AfterLighting, lit);
+
             inputs = new CommandBuffer { name = "VRMod.Upscaling.AfterForwardAlpha" };
+            UpscalingProfiler.Mark(inputs, Name + " eye: sky and transparent objects drawn");
             inputs.IssuePluginEventAndData(UpscalingNative.SceneInputsGetEvent(), 100, Inputs);
             inputs.Blit(BuiltinRenderTextureType.MotionVectors, Motion);
             // Stage 102 reads the blit's bound source, so it follows the blit directly.
@@ -244,6 +254,7 @@ namespace VRMod
             // Event ids are copied into Unity's queued command stream, so the frame number is rebuilt every frame.
             geometry.Clear();
             geometry.IssuePluginEventAndData(UpscalingNative.SceneInputsGetFrameEvent(), Time.frameCount, Inputs);
+            UpscalingProfiler.Mark(geometry, Name + " eye: G-buffer drawn");
             geometry.IssuePluginEventAndData(UpscalingNative.SceneInputsGetEvent(), 90, Inputs);
 
             // With a post-processing layer the jitter is applied from its pre-cull (see UpscalingHooks).
@@ -336,11 +347,13 @@ namespace VRMod
             if (source.width != RenderWidth || source.height != RenderHeight)
                 throw new InvalidOperationException("the " + Name + " eye rendered at " + source.width + "x" + source.height + " instead of " + RenderWidth + "x" + RenderHeight);
             tail.Clear();
+            if (UpscalingProfiler.Active) UpscalingProfiler.Mark(tail, Name + " eye: post-processing done");
             tail.SetRenderTarget(source);
             tail.Blit(source, Color);
             bool evaluate = Prepared && Context != IntPtr.Zero && UpscalingNative.UpscalerState(Context) > 0;
             if (evaluate) { tail.IssuePluginEventAndData(UpscalingNative.UpscalerGetEvaluateEvent(), Time.frameCount, Context); ++Evaluations; }
             else tail.Blit(source, Output);
+            if (UpscalingProfiler.Active) UpscalingProfiler.Mark(tail, Name + " eye: upscaled");
             tail.SetRenderTarget(destination ? new RenderTargetIdentifier(destination) : new RenderTargetIdentifier(BuiltinRenderTextureType.CameraTarget));
             Graphics.ExecuteCommandBuffer(tail);
         }
@@ -360,12 +373,14 @@ namespace VRMod
             if (tailComponent) tailComponent.Eye = null;
             if (Camera)
             {
+                if (started != null) Camera.RemoveCommandBuffer(CameraEvent.BeforeGBuffer, started);
                 if (geometry != null) Camera.RemoveCommandBuffer(CameraEvent.AfterGBuffer, geometry);
+                if (lit != null) Camera.RemoveCommandBuffer(CameraEvent.AfterLighting, lit);
                 if (inputs != null) Camera.RemoveCommandBuffer(CameraEvent.AfterForwardAlpha, inputs);
                 Camera.targetTexture = null;
             }
-            geometry?.Release(); inputs?.Release(); tail?.Release();
-            geometry = inputs = tail = null;
+            geometry?.Release(); inputs?.Release(); tail?.Release(); started?.Release(); lit?.Release();
+            geometry = inputs = tail = started = lit = null;
             if (Object) UnityEngine.Object.Destroy(Object);
             Object = null; Camera = null; Layer = null; tailComponent = null;
         }

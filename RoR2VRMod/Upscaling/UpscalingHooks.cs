@@ -16,6 +16,7 @@ namespace VRMod
     {
         private const BindingFlags Any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         private static readonly List<PostProcessVolume> retargeted = new List<PostProcessVolume>();
+        private static readonly List<Hook> hooks = new List<Hook>(); // kept referenced for as long as the game runs
         private static bool installed;
 
         // Private members of the post-processing package. The project references that assembly
@@ -59,16 +60,18 @@ namespace VRMod
 
             MethodInfo preCull = typeof(PostProcessLayer).GetMethod("OnPreCull", Any);
             MethodInfo preRender = typeof(PostProcessLayer).GetMethod("OnPreRender", Any);
-            if (preCull == null || preRender == null) throw new MissingMethodException("PostProcessLayer.OnPreCull/OnPreRender");
+            MethodInfo renderImage = typeof(PostProcessLayer).GetMethod("OnRenderImage", Any, null, new[] { typeof(RenderTexture), typeof(RenderTexture) }, null);
+            if (preCull == null || preRender == null || renderImage == null) throw new MissingMethodException("PostProcessLayer.OnPreCull/OnPreRender/OnRenderImage");
             foreach (FieldInfo field in legacyBufferFields) if (field == null) throw new MissingFieldException("PostProcessLayer legacy command buffers");
-            new Hook(preCull, (Action<Action<PostProcessLayer>, PostProcessLayer>)LayerPreCull);
-            new Hook(preRender, (Action<Action<PostProcessLayer>, PostProcessLayer>)LayerPreRender);
+            hooks.Add(new Hook(preCull, (Action<Action<PostProcessLayer>, PostProcessLayer>)LayerPreCull));
+            hooks.Add(new Hook(preRender, (Action<Action<PostProcessLayer>, PostProcessLayer>)LayerPreRender));
+            hooks.Add(new Hook(renderImage, (Action<Action<PostProcessLayer, RenderTexture, RenderTexture>, PostProcessLayer, RenderTexture, RenderTexture>)LayerRenderImage));
 
             // Optional: without it, effects aimed at the player's own camera (for example the
             // low-health screen tint) do not show while upscaling.
             MethodInfo updateSettings = typeof(PostProcessManager).GetMethod("UpdateSettings", Any, null, new[] { typeof(PostProcessLayer), typeof(Camera) }, null);
             if (updateSettings != null)
-                new Hook(updateSettings, (Action<Action<PostProcessManager, PostProcessLayer, Camera>, PostProcessManager, PostProcessLayer, Camera>)ManagerUpdateSettings);
+                hooks.Add(new Hook(updateSettings, (Action<Action<PostProcessManager, PostProcessLayer, Camera>, PostProcessManager, PostProcessLayer, Camera>)ManagerUpdateSettings));
             else
                 VRMod.StaticLogger.LogWarning("[VR upscaling] PostProcessManager.UpdateSettings was not found; camera-specific screen effects will not show while upscaling.");
 
@@ -98,6 +101,16 @@ namespace VRMod
         {
             if (Upscaling.EyeFor(self) == null && Upscaling.SkipRealLayer(self)) return;
             orig(self);
+        }
+
+        // The layer is the first image effect of its camera. On the scene camera, while the eyes are
+        // being presented, this is where each eye pass gets its upscaled image (Upscaling.Present).
+        private static void LayerRenderImage(Action<PostProcessLayer, RenderTexture, RenderTexture> orig, PostProcessLayer self, RenderTexture source, RenderTexture destination)
+        {
+            bool presented = false;
+            try { presented = Upscaling.Present(self, destination); }
+            catch (Exception e) { Upscaling.Fail("showing an upscaled eye failed: " + e.Message); }
+            if (!presented) orig(self, source, destination);
         }
 
         // The game aims some post-processing volumes at one camera's layer (PostProcessVolume.targetLayer,

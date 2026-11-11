@@ -61,6 +61,7 @@ namespace VRMod
         internal static ConfigEntry<bool> UpscalingLoadLibrary { get; private set; }
         internal static ConfigEntry<string> UpscalingLogLevel { get; private set; }
         internal static ConfigEntry<bool> UpscalingFlip { get; private set; }
+        internal static ConfigEntry<string> UpscalingProfiler { get; private set; }
         internal static ConfigEntry<float> BottomAnchor { get; private set; }
         internal static ConfigEntry<float> TopAnchor { get; private set; }
         internal static ConfigEntry<float> LeftAnchor { get; private set; }
@@ -641,6 +642,12 @@ namespace VRMod
                 "Flip upscaled image",
                 false,
                 "Troubleshooting only: turn on if the world appears upside down in the headset while upscaling is on."
+            );
+            UpscalingProfiler = configFile.Bind<string>(
+                "Upscaling",
+                "Upscaling profiler",
+                "Start",
+                "Records how much GPU time each upscaling step takes, to BepInEx\\VRMod-Upscaling\\profile.log. Start records the first minute after upscaling turns on or one of its settings changes; Always records the whole time; Off records nothing. Values: Off, Start, Always."
             );
             BottomAnchor = configFile.Bind<float>(
                 "HUD Settings",
