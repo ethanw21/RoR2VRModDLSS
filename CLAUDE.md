@@ -26,7 +26,7 @@ RoR2VRMod/                  ← source code (C#)
     SettingsTabs.cs           ← grip-driven settings tab switching
     MenuSubmitGuard.cs        ← one-press-per-activation for menu buttons
     InputTypes/               ← BaseInput subclasses: ButtonInput, HoldableButtonInput, etc.
-  Camera/                    ← VR camera, stereo projection fix, recentering, vignette
+  Camera/                    ← VR camera, stereo projection fix, recentering, vignette, eye texture guard (see "Eye texture guard" below)
   MotionControls/            ← hand tracking, per-survivor weapon animations
   Haptics/                   ← Shockwave / bHaptics suit support (optional DLLs)
   UI/                        ← HUD, UI pointer, UI fixes
@@ -120,6 +120,16 @@ private static GenericHapticsController CreateShockwave() => new ShockwaveContro
 - **Package layout:** `patchers/VRMod.Upscaling.Native.dll`; `plugins/upscaling/D3D11/` (six NVIDIA runtime DLLs), `plugins/upscaling/licenses/`, `plugins/upscaling/native-manifest.json`.
 - **Private post-processing members** (`PostProcessLayer.m_LegacyCmdBuffer*`, `m_Resources`, `PostProcessManager.m_Volumes`) are reached through reflection in `UpscalingHooks.cs`, because `VRMod.csproj` references `Unity.Postprocessing.Runtime` unpublicized.
 - **Settings:** section `[Upscaling]` in `VRMod.cfg`. String settings with a `choices` array show as carousels in the VR tab (`ConfigSetting.choices`, `SettingsAddon.cs`).
+
+### Eye texture guard (1.2.2)
+
+`RoR2VRMod/Camera/EyeTextureGuard.cs` is an `OpenXRFeature` created at runtime next to the controller profiles (`SetupControllerProfiles`). Through `HookGetInstanceProcAddr` it wraps three OpenXR calls: `xrEnumerateViewConfigurationViews` (recommended eye size), `xrEnumerateSwapchainFormats` and `xrCreateSwapchain`.
+
+- **Why:** on a Pimax Dream Air with the Pimax OpenXR runtime 0.1.0, every `xrCreateSwapchain` returned `XR_ERROR_FEATURE_UNSUPPORTED` for the size (6464x5044) and format (29, RGBA8 sRGB) the runtime itself had recommended; the headset stayed black. Which part of the request that runtime rejects was not known when this was written.
+- **What Unity asks for** (from disassembling `UnityOpenXR.dll` 1.9.1): type 9, no extension data, create flags 0, usage 0x21 (colour attachment + sampled), the first runtime format it can use, the recommended sample count, width and height = recommended size x render scale rounded to even, 1 face, 1 layer in MultiPass, 1 mip. It re-reads the recommended size and the format list before every attempt and retries every frame, which is what lets the guard steer the next attempt.
+- **Behaviour:** pass-through while the runtime accepts. After three refusals in a row with a request-type error it probes usage flags x colour formats x sizes (each accepted probe is destroyed at once), then applies the best: usage override inside the create call, a format list reduced to one colour format, or a scale on the recommended size.
+- **Threads:** the three calls arrive on Unity's render thread. Nothing in the hooks touches Unity objects; messages are queued and written by `EyeTextureGuardDriver.Update`.
+- **Test without a headset:** `tests/eyeguard` in the build environment (`/mnt/project-files/vrmod-dlss/build-env/`) runs the guard against a pretend runtime written in C with different acceptance rules.
 
 ### Lobby navigation
 

@@ -14,7 +14,7 @@ using UnityEngine.XR.OpenXR.Features;
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
 namespace VRMod
 {
-    [BepInPlugin("com.DrBibop.VRMod", "Resurrected VRMod", "1.2.1")]
+    [BepInPlugin("com.DrBibop.VRMod", "Resurrected VRMod", "1.2.2")]
     [BepInDependency("com.Moffein.BanditTweaks", BepInDependency.DependencyFlags.SoftDependency)]
     public class VRMod : BaseUnityPlugin
     {
@@ -107,6 +107,12 @@ namespace VRMod
 
             managerSettings.m_Loaders.Add(xrLoader);
 
+            // Writes what the eye texture guard recorded, from the main thread. Made before the
+            // loader starts so its messages appear even when starting OpenXR fails.
+            var guardDriver = new GameObject("VRMod eye texture guard");
+            DontDestroyOnLoad(guardDriver);
+            guardDriver.AddComponent<EyeTextureGuardDriver>();
+
             managerSettings.InitializeLoaderSync();
 
             if (managerSettings.activeLoader == null)
@@ -180,6 +186,7 @@ namespace VRMod
             }
             finally
             {
+                try { EyeTextureGuard.Flush(); } catch { }
                 StaticLogger.LogInfo("[VR shutdown] Ending process.");
                 FlushBepInExLog();
                 try { System.Diagnostics.Process.GetCurrentProcess().Kill(); }
@@ -251,10 +258,24 @@ namespace VRMod
                     }
                 }
 
+                // Not a controller profile: watches the calls that create the eye textures and
+                // helps when the runtime refuses them (see EyeTextureGuard).
+                try
+                {
+                    EyeTextureGuard.Configure(ModConfig.EyeTextureFallback.Value, ModConfig.EyeTextureScale.Value);
+                    var guard = ScriptableObject.CreateInstance<EyeTextureGuard>();
+                    guard.enabled = true;
+                    features.Add(guard);
+                }
+                catch (Exception e)
+                {
+                    StaticLogger.LogWarning($"  Eye texture guard not added: {e.Message}");
+                }
+
                 if (features.Count > 0)
                 {
                     openXRSettings.features = features.ToArray();
-                    StaticLogger.LogInfo($"SetupControllerProfiles: Added {features.Count} controller profiles");
+                    StaticLogger.LogInfo($"SetupControllerProfiles: Added {features.Count} OpenXR features (controller profiles and the eye texture guard)");
                 }
                 else
                 {

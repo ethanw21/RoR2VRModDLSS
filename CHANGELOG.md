@@ -2,6 +2,15 @@
 
 This package continues [DrBibop's RoR2VRMod](https://github.com/DrBibop/RoR2VRMod) (MIT), whose own history ends at 2.9.2; its original changelog is kept in the source repository as `CHANGELOG-original-DrBibop.md`. Version numbers restart at 1.0.x for this package.
 
+### 1.2.2
+
+For headsets whose OpenXR runtime refuses the eye textures the game asks for. Found on a Pimax Dream Air with the Pimax OpenXR runtime set as default: the session started, every request for an eye texture came back `XR_ERROR_FEATURE_UNSUPPORTED`, and the headset stayed black (the same game worked through SteamVR's runtime).
+
+**New**
+- **Eye texture fallback** (on by default): when the runtime refuses the eye textures three times in a row, the mod asks it for the same textures with other usage flags, other formats and smaller sizes, and continues with the best combination it accepts. The game's normal request is tried first and is left alone while the runtime accepts it. Not yet confirmed on the headset that has the problem.
+- **What happened is written to the log** (`BepInEx/LogOutput.log`, lines starting with `[VR display]`): the request, the runtime's answer, which alternatives it accepted, what the mod continued with, and the OpenXR session states. On a refusal it also lists the libraries loaded into the game from outside the Windows folder.
+- **Eye texture scale** (config file, section `Headset compatibility`, 0.25 to 1, default 1): renders the eye textures smaller than the runtime recommends. Applies after a restart.
+
 ### 1.2.1
 
 Fixes for upscaling after its first test in a headset (4940x4136 per eye, RTX 5090).

@@ -62,6 +62,8 @@ namespace VRMod
         internal static ConfigEntry<string> UpscalingLogLevel { get; private set; }
         internal static ConfigEntry<bool> UpscalingFlip { get; private set; }
         internal static ConfigEntry<string> UpscalingProfiler { get; private set; }
+        internal static ConfigEntry<bool> EyeTextureFallback { get; private set; }
+        internal static ConfigEntry<float> EyeTextureScale { get; private set; }
         internal static ConfigEntry<float> BottomAnchor { get; private set; }
         internal static ConfigEntry<float> TopAnchor { get; private set; }
         internal static ConfigEntry<float> LeftAnchor { get; private set; }
@@ -648,6 +650,18 @@ namespace VRMod
                 "Upscaling profiler",
                 "Start",
                 "Records how much GPU time each upscaling step takes, to BepInEx\\VRMod-Upscaling\\profile.log. Start records the first minute after upscaling turns on or one of its settings changes; Always records the whole time; Off records nothing. Values: Off, Start, Always."
+            );
+            EyeTextureFallback = configFile.Bind<bool>(
+                "Headset compatibility",
+                "Eye texture fallback",
+                true,
+                "When the headset's OpenXR runtime refuses the eye textures the game asks for (the headset stays black), try other usage flags, other formats and smaller sizes, and continue with the best combination it accepts. What was tried is written to LogOutput.log under [VR display]. Applies after a restart."
+            );
+            EyeTextureScale = configFile.Bind<float>(
+                "Headset compatibility",
+                "Eye texture scale",
+                1f,
+                "Size of the eye textures as a share of what the headset's runtime recommends, from 0.25 to 1. Lower it if the runtime recommends more than it accepts or more than the graphics card can handle. Applies after a restart."
             );
             BottomAnchor = configFile.Bind<float>(
                 "HUD Settings",
